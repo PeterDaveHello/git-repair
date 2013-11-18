@@ -347,7 +347,7 @@ repositories:
 # path to the omega cgi program
 omega_cgi: /usr/lib/cgi-bin/omega/omega
 # use google site search rather than internal xapian index?
-#google_search: 1
+google_search: 1
 
 # theme plugin
 # name of theme to enable
