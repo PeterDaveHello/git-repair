@@ -33,7 +33,7 @@ cgi_wrappermode: 0755
 # number of seconds to delay CGI requests when overloaded
 cgi_overload_delay: ''
 # message to display when overloaded (may contain html)
-cgi_overload_message: ''
+cgi_overload_message: Please wait..
 # enable optimization of only refreshing committed changes?
 only_committed_changes: 0
 # rcs backend to use
