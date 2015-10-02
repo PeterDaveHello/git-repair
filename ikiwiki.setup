@@ -128,6 +128,8 @@ cookiejar:
 useragent: ikiwiki/3.20150330
 # theme has a responsive layout? (mobile-optimized)
 responsive_layout: 1
+# try harder to produce deterministic output
+deterministic: 0
 
 ######################################################################
 # core plugins
@@ -219,6 +221,10 @@ pingurl: []
 #blogspam_options: blacklist=1.2.3.4,blacklist=8.7.6.5,max-links=10
 # blogspam server JSON url
 #blogspam_server: ''
+
+# emailauth plugin
+# email address to send emailauth mails as (default: adminemail)
+emailauth_sender: login@branchable.com
 
 # httpauth plugin
 # url to redirect to when authentication is needed
