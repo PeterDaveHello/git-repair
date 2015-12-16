@@ -16,9 +16,10 @@ Build-Depends:
 	libghc-quickcheck2-dev,
 	libghc-utf8-string-dev,
 	libghc-async-dev,
-	libghc-optparse-applicative-dev (>= 0.10.0)
-Maintainer: Joey Hess <joeyh@debian.org>
-Standards-Version: 3.9.5
+	libghc-optparse-applicative-dev (>= 0.10.0),
+	libghc-network-uri-dev
+Maintainer: Richard Hartmann <richih@debian.org>
+Standards-Version: 3.9.6
 Vcs-Git: git://git-repair.branchable.com/
 Homepage: http://git-repair.branchable.com/
 
@@ -26,7 +27,7 @@ Package: git-repair
 Architecture: any
 Section: utils
 Depends: ${misc:Depends}, ${shlibs:Depends}, git, rsync
-Description: repair various forms of damage to git repositorie
+Description: repair various forms of damage to git repositories
  git-repair can repair various forms of damage to git repositories.
  .
  It is a complement to git fsck, which finds problems, but does not fix them.

@@ -16,7 +16,7 @@ import System.FilePath as X
 import System.Directory as X
 import System.IO as X hiding (FilePath)
 #ifndef mingw32_HOST_OS
-import System.Posix.IO as X
+import System.Posix.IO as X hiding (createPipe)
 #endif
 import System.Exit as X
 
@@ -30,6 +30,7 @@ import Utility.Monad as X
 import Utility.Data as X
 import Utility.Applicative as X
 import Utility.FileSystemEncoding as X
-import Utility.PosixFiles as X
+import Utility.PosixFiles as X hiding (fileSize)
+import Utility.FileSize as X
 
 import Utility.PartialPrelude as X
