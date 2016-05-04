@@ -1,3 +1,9 @@
+git-repair (1.20151216) UNRELEASED; urgency=medium
+
+  * git-repair.cabal: Add Setup-Depends.
+
+ -- Joey Hess <id@joeyh.name>  Wed, 04 May 2016 12:16:33 -0400
+
 git-repair (1.20151215) unstable; urgency=medium
 
   * Fix insecure temporary permissions and potential denial of

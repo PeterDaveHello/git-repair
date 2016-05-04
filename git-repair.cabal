@@ -44,6 +44,9 @@ Executable git-repair
   else
     Build-Depends: unix
 
+custom-setup
+  Setup-Depends: base (>= 4.5), hslogger, MissingH
+
 source-repository head
   type: git
   location: git://git-repair.branchable.com/
