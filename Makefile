@@ -24,7 +24,7 @@ clean:
 
 # Upload to hackage.
 hackage: clean
-	./Build/make-sdist.sh
+	@cabal sdist
 	@cabal upload dist/*.tar.gz
 
 # hothasktags chokes on some template haskell etc, so ignore errors

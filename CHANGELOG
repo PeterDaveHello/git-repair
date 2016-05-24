@@ -1,1 +1,115 @@
-debian/changelog
+git-repair (1.20151216) UNRELEASED; urgency=medium
+
+  * git-repair.cabal: Add Setup-Depends.
+  * Updated cabal file explictly lists source files. The tarball
+    on hackage will include only the files needed for cabal install;
+    it is NOT the full git-repair source tree.
+  * debian/changelog: Converted to symlinks to CHANGELOG.
+
+ -- Joey Hess <id@joeyh.name>  Wed, 04 May 2016 12:16:33 -0400
+
+git-repair (1.20151215) unstable; urgency=medium
+
+  * Fix insecure temporary permissions and potential denial of
+    service attack when creating temp dirs. Closes: #807341
+  * Merge from git-annex.
+
+ -- Joey Hess <id@joeyh.name>  Tue, 15 Dec 2015 20:47:59 -0400
+
+git-repair (1.20150106) unstable; urgency=medium
+
+  * Debian package is now maintained by Richard Hartmann.
+  * Fix build with process 1.2.1.0.
+  * Merge from git-annex.
+
+ -- Joey Hess <id@joeyh.name>  Tue, 06 Jan 2015 19:09:23 -0400
+
+git-repair (1.20141027) unstable; urgency=medium
+
+  * Adjust cabal file to support network-uri split.
+  * Merge Build/ from git-annex, including removing a use of deprecated
+    System.Cmd.
+
+ -- Joey Hess <joeyh@debian.org>  Mon, 27 Oct 2014 11:09:56 -0400
+
+git-repair (1.20141026) unstable; urgency=medium
+
+  * Prevent auto gc from happening when fetching from a remote.
+  * Merge from git-annex.
+
+ -- Joey Hess <joeyh@debian.org>  Sun, 26 Oct 2014 13:37:30 -0400
+
+git-repair (1.20140914) unstable; urgency=medium
+
+  * Update to build with optparse-applicative 0.10. Closes: #761552
+
+ -- Joey Hess <joeyh@debian.org>  Sun, 14 Sep 2014 12:48:27 -0400
+
+git-repair (1.20140815) unstable; urgency=medium
+
+  * Removing bad objects could leave fsck finding no more unreachable objects,
+    but some branches no longer accessible. Fix this, including support for
+    fixing up repositories that were incompletely repaired before.
+  * Merge from git-annex.
+
+ -- Joey Hess <joeyh@debian.org>  Fri, 15 Aug 2014 13:49:09 -0400
+
+git-repair (1.20140423) unstable; urgency=medium
+
+  * Improve memory usage when git fsck finds a great many broken objects.
+  * Merge from git-annex.
+
+ -- Joey Hess <joeyh@debian.org>  Wed, 23 Apr 2014 14:01:30 -0400
+
+git-repair (1.20140227) unstable; urgency=medium
+
+  * Optimise unpacking of pack files, and avoid repeated error
+    messages about corrupt pack files.
+  * Add swapping 2 files test case.
+
+ -- Joey Hess <joeyh@debian.org>  Thu, 27 Feb 2014 11:56:27 -0400
+
+git-repair (1.20140115) unstable; urgency=medium
+
+  * Support old git versions from before git fsck --no-dangling was
+    implemented.
+  * Fix bug in packed refs file exploding code that caused a .gitrefs
+    directory to be created instead of .git/refs
+  * Check git version at run time.
+
+ -- Joey Hess <joeyh@debian.org>  Wed, 15 Jan 2014 16:53:30 -0400
+
+git-repair (1.20131213) unstable; urgency=low
+
+  * Improve repair of index files in some situations.
+
+ -- Joey Hess <joeyh@debian.org>  Fri, 13 Dec 2013 14:51:51 -0400
+
+git-repair (1.20131203) unstable; urgency=low
+
+  * Fix build deps. Closes: #731179
+
+ -- Joey Hess <joeyh@debian.org>  Tue, 03 Dec 2013 15:02:21 -0400
+
+git-repair (1.20131122) unstable; urgency=low
+
+  * Added test mode, which can be used to randomly corrupt test 
+    repositories, in reproducible ways, which allows easy
+    corruption-driven-development.
+  * Improve repair code in the case where the index file is corrupt,
+    and this hides other problems.
+  * Write a dummy .git/HEAD if the file is missing or corrupt, as
+    git otherwise will not treat the repository as a git repo.
+  * Improve fsck code to find badly corrupted objects that crash git fsck
+    before it can complain about them.
+  * Fixed crashes on bad file encodings.
+  * Can now run 10000 tests (git-repair --test -n 10000 --force)
+    with 0 failures.
+
+ -- Joey Hess <joeyh@debian.org>  Fri, 22 Nov 2013 11:16:03 -0400
+
+git-repair (1.20131118) unstable; urgency=low
+
+  * First release
+
+ -- Joey Hess <joeyh@debian.org>  Mon, 18 Nov 2013 13:38:12 -0400
