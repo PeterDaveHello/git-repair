@@ -1,14 +1,16 @@
 {- Tests the system and generates Build.SysConfig.hs. -}
 
+{-# OPTIONS_GHC -fno-warn-tabs #-}
+
 module Build.TestConfig where
 
 import Utility.Path
 import Utility.Monad
 import Utility.SafeCommand
+import Utility.Directory
 
 import System.IO
 import System.FilePath
-import System.Directory
 
 type ConfigKey = String
 data ConfigValue =
