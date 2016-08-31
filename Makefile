@@ -22,11 +22,6 @@ clean:
 	find . -name \*.o -exec rm {} \;
 	find . -name \*.hi -exec rm {} \;
 
-# Upload to hackage.
-hackage: clean
-	@cabal sdist
-	@cabal upload dist/*.tar.gz
-
 # hothasktags chokes on some template haskell etc, so ignore errors
 tags:
 	(for f in $$(find . | grep -v /.git/ | grep -v /tmp/ | grep -v /dist/ | grep -v /doc/ | egrep '\.hs$$'); do hothasktags -c --cpp -c -traditional -c --include=dist/build/autogen/cabal_macros.h $$f; done) 2>/dev/null | sort > tags
