@@ -1,14 +1,25 @@
+# set to "./Setup" if you lack a cabal program. Or can be set to "stack"
+BUILDER?=cabal
+GHC?=ghc
+
 PREFIX=/usr
-CABAL?=cabal # set to "./Setup" if you lack a cabal program
 
 build: Build/SysConfig.hs
-	$(CABAL) build
-	ln -sf dist/build/git-repair/git-repair git-repair
+	$(BUILDER) build $(BUILDEROPTIONS)
+	if [ "$(BUILDER)" = stack ]; then \
+		ln -sf $$(find .stack-work/ -name git-repair -type f | grep build/git-annex/git-repair | tail -n 1) git-repair; \
+	else \
+		ln -sf dist/build/git-repair/git-repair git-repair; \
+	fi
 	@$(MAKE) tags >/dev/null 2>&1 &
 
-Build/SysConfig.hs: configure.hs Build/TestConfig.hs Build/Configure.hs
-	if [ "$(CABAL)" = ./Setup ]; then ghc --make Setup; fi
-	$(CABAL) configure --ghc-options="$(shell Build/collect-ghc-options.sh)"
+Build/SysConfig.hs: Build/TestConfig.hs Build/Configure.hs
+	if [ "$(BUILDER)" = ./Setup ]; then ghc --make Setup; fi
+	if [ "$(BUILDER)" = stack ]; then \
+		$(BUILDER) build $(BUILDEROPTIONS); \
+	else \
+		$(BUILDER) configure --ghc-options="$(shell Build/collect-ghc-options.sh)"; \
+	fi
 
 install: build
 	install -d $(DESTDIR)$(PREFIX)/bin
