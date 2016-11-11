@@ -1,12 +1,13 @@
-git-repair (1.20151216) UNRELEASED; urgency=medium
+git-repair (1.20161111) unstable; urgency=medium
 
   * git-repair.cabal: Add Setup-Depends.
   * Updated cabal file explictly lists source files. The tarball
     on hackage will include only the files needed for cabal install;
     it is NOT the full git-repair source tree.
   * debian/changelog: Converted to symlinks to CHANGELOG.
+  * Merge from git-annex.
 
- -- Joey Hess <id@joeyh.name>  Wed, 04 May 2016 12:16:33 -0400
+ -- Joey Hess <id@joeyh.name>  Fri, 11 Nov 2016 14:56:14 -0400
 
 git-repair (1.20151215) unstable; urgency=medium
 

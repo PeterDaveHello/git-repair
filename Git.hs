@@ -26,8 +26,10 @@ module Git (
 	repoDescribe,
 	repoLocation,
 	repoPath,
+	repoWorkTree,
 	localGitDir,
 	attributes,
+	attributesLocal,
 	hookPath,
 	assertLocal,
 	adjustPath,
@@ -71,6 +73,10 @@ repoPath Repo { location = Local { worktree = Just d } } = d
 repoPath Repo { location = Local { gitdir = d } } = d
 repoPath Repo { location = LocalUnknown dir } = dir
 repoPath Repo { location = Unknown } = error "unknown repoPath"
+
+repoWorkTree :: Repo -> Maybe FilePath
+repoWorkTree Repo { location = Local { worktree = Just d } } = Just d
+repoWorkTree _ = Nothing
 
 {- Path to a local repository's .git directory. -}
 localGitDir :: Repo -> FilePath
@@ -125,8 +131,11 @@ assertLocal repo action
 {- Path to a repository's gitattributes file. -}
 attributes :: Repo -> FilePath
 attributes repo
-	| repoIsLocalBare repo = repoPath repo ++ "/info/.gitattributes"
-	| otherwise = repoPath repo ++ "/.gitattributes"
+	| repoIsLocalBare repo = attributesLocal repo
+	| otherwise = repoPath repo </> ".gitattributes"
+
+attributesLocal :: Repo -> FilePath
+attributesLocal repo = localGitDir repo </> "info" </> "attributes"
 
 {- Path to a given hook script in a repository, only if the hook exists
  - and is executable. -}
