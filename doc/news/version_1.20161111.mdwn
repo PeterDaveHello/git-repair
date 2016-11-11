@@ -1,0 +1,10 @@
+git-repair 1.20161111 released with [[!toggle text="these changes"]]
+[[!toggleable text="""
+   * git-repair.cabal: Add Setup-Depends.
+   * Updated cabal file explictly lists source files. The tarball
+     on hackage will include only the files needed for cabal install;
+     it is NOT the full git-repair source tree.
+   * debian/changelog: Converted to symlinks to CHANGELOG.
+   * Merge from git-annex.
+   * Makefile: Support building with stack as well as cabal.
+   * Makefile: The CABAL variable has been renamed to BUILDER."""]]
