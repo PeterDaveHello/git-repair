@@ -1,3 +1,9 @@
+git-repair (1.20161118) UNRELEASED; urgency=medium
+
+  * Fix build with recent versions of cabal and ghc.
+
+ -- Joey Hess <id@joeyh.name>  Fri, 18 Nov 2016 12:58:43 -0400
+
 git-repair (1.20161111) unstable; urgency=medium
 
   * git-repair.cabal: Add Setup-Depends.
