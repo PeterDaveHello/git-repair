@@ -1,8 +1,8 @@
-git-repair (1.20161118) UNRELEASED; urgency=medium
+git-repair (1.20161118) unstable; urgency=medium
 
   * Fix build with recent versions of cabal and ghc.
 
- -- Joey Hess <id@joeyh.name>  Fri, 18 Nov 2016 12:58:43 -0400
+ -- Joey Hess <id@joeyh.name>  Fri, 18 Nov 2016 12:59:07 -0400
 
 git-repair (1.20161111) unstable; urgency=medium
 
