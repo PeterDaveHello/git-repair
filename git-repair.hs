@@ -15,6 +15,7 @@ import qualified Git.Construct
 import qualified Git.Destroyer
 import qualified Git.Fsck
 import Utility.Tmp
+import Utility.FileSystemEncoding
 
 data Settings = Settings
 	{ forced :: Bool
@@ -46,7 +47,9 @@ parseSettings = Settings
 		)
 
 main :: IO ()
-main = execParser opts >>= go
+main = do
+	useFileSystemEncoding
+	execParser opts >>= go
   where
 	opts = info (helper <*> parseSettings) desc
 	desc = fullDesc
