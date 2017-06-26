@@ -9,7 +9,6 @@ import Control.Monad.IO.Class as X (liftIO)
 
 import Data.Maybe as X
 import Data.List as X hiding (head, tail, init, last)
-import Data.String.Utils as X hiding (join)
 import Data.Monoid as X
 import Data.Default as X
 
@@ -31,5 +30,6 @@ import Utility.Data as X
 import Utility.Applicative as X
 import Utility.PosixFiles as X hiding (fileSize)
 import Utility.FileSize as X
+import Utility.Split as X
 
 import Utility.PartialPrelude as X

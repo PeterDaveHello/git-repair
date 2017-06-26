@@ -30,7 +30,7 @@ Flag network-uri
   Default: True
 
 custom-setup
-  Setup-Depends: base (>= 4.5), hslogger, MissingH, unix-compat, process,
+  Setup-Depends: base (>= 4.5), hslogger, split, unix-compat, process,
     unix, filepath, exceptions, bytestring, directory, IfElse, data-default,
     mtl, Cabal
 
@@ -41,7 +41,7 @@ source-repository head
 Executable git-repair
   Main-Is: git-repair.hs
   GHC-Options: -threaded -Wall -fno-warn-tabs
-  Build-Depends: MissingH, hslogger, directory, filepath, containers, mtl,
+  Build-Depends: split, hslogger, directory, filepath, containers, mtl,
    unix-compat, bytestring, exceptions (>= 0.6), transformers,
    base >= 4.5, base < 5, IfElse, text, process, time, QuickCheck,
    utf8-string, async, optparse-applicative (>= 0.10.0),
@@ -92,6 +92,7 @@ Executable git-repair
     Utility.Batch
     Utility.CoProcess
     Utility.Data
+    Utility.DataUnits
     Utility.Directory
     Utility.DottedVersion
     Utility.Env
@@ -100,18 +101,23 @@ Executable git-repair
     Utility.FileSize
     Utility.FileSystemEncoding
     Utility.Format
+    Utility.HumanNumber
+    Utility.HumanTime
     Utility.Metered
     Utility.Misc
     Utility.Monad
     Utility.PartialPrelude
     Utility.Path
+    Utility.Percentage
     Utility.PosixFiles
     Utility.Process
     Utility.Process.Shim
     Utility.QuickCheck
     Utility.Rsync
     Utility.SafeCommand
+    Utility.Split
     Utility.SystemDirectory
     Utility.ThreadScheduler
     Utility.Tmp
+    Utility.Tuple
     Utility.UserInfo
