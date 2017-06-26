@@ -1,10 +1,10 @@
-git-repair (1.20161119) UNRELEASED; urgency=medium
+git-repair (1.20170626) unstable; urgency=medium
 
   * Merge from git-annex.
   * Removes dependency on MissingH, adding a dependency on split instead.
   * Fixes build with directory-1.3.
 
- -- Joey Hess <id@joeyh.name>  Sat, 24 Dec 2016 14:53:47 -0400
+ -- Joey Hess <id@joeyh.name>  Mon, 26 Jun 2017 12:15:29 -0400
 
 git-repair (1.20161118) unstable; urgency=medium
 
