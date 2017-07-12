@@ -7,7 +7,7 @@ PREFIX=/usr
 build: Build/SysConfig.hs
 	$(BUILDER) build $(BUILDEROPTIONS)
 	if [ "$(BUILDER)" = stack ]; then \
-		ln -sf $$(find .stack-work/ -name git-repair -type f | grep build/git-annex/git-repair | tail -n 1) git-repair; \
+		ln -sf $$(stack path --dist-dir)/build/git-annex/git-repair git-repair; \
 	else \
 		ln -sf dist/build/git-repair/git-repair git-repair; \
 	fi
