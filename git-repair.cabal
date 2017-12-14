@@ -58,6 +58,7 @@ Executable git-repair
     Build-Depends: unix
 
   Other-Modules:
+    BuildInfo
     Build.Configure
     Build.TestConfig
     Build.Version

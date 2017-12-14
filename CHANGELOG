@@ -1,3 +1,9 @@
+git-repair (1.20170627) UNRELEASED; urgency=medium
+
+  * Merge from git-annex.
+
+ -- Joey Hess <id@joeyh.name>  Thu, 14 Dec 2017 12:55:44 -0400
+
 git-repair (1.20170626) unstable; urgency=medium
 
   * Merge from git-annex.
