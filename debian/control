@@ -18,10 +18,11 @@ Build-Depends:
 	libghc-async-dev,
 	libghc-optparse-applicative-dev (>= 0.10.0),
 	libghc-network-uri-dev
-Maintainer: Richard Hartmann <richih@debian.org>
+Maintainer: Sean Whitton <spwhitton@spwhitton.name>
 Standards-Version: 3.9.6
-Vcs-Git: git://git-repair.branchable.com/
-Homepage: http://git-repair.branchable.com/
+Vcs-Git: https://git.spwhitton.name/git-repair
+Vcs-Browser: https://git.spwhitton.name/git-repair
+Homepage: https://git-repair.branchable.com/
 
 Package: git-repair
 Architecture: any

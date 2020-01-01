@@ -1,3 +1,12 @@
+git-repair (1.20151215-2) UNRELEASED; urgency=medium
+
+  * Adopt package.
+    Maintainer has approved this via personal communication.
+  * Point Vcs-* fields at my repo.
+  * Use https in Homepage: field & Format: field in d/copyright.
+
+ -- Sean Whitton <spwhitton@spwhitton.name>  Wed, 01 Jan 2020 20:51:55 +0000
+
 git-repair (1.20151215-1.2) unstable; urgency=medium
 
   * Non-maintainer upload.
