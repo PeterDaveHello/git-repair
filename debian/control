@@ -23,6 +23,7 @@ Standards-Version: 4.4.1
 Vcs-Git: https://git.spwhitton.name/git-repair
 Vcs-Browser: https://git.spwhitton.name/git-repair
 Homepage: https://git-repair.branchable.com/
+Rules-Requires-Root: no
 
 Package: git-repair
 Architecture: any
