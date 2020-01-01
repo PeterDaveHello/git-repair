@@ -7,6 +7,10 @@ git-repair (1.20151215-2) UNRELEASED; urgency=medium
   * Declare compliance with Debian Policy 4.4.1.
   * Drop debian/gbp.conf.
   * Declare Rules-Requires-Root: no.
+  * d/copyright:
+    - Point Source: field at upstream git repo
+    - Fix upstream copyright years to include 2014 & 2015
+    - Replace `License: GPL-3+` body with standard text for this license.
 
  -- Sean Whitton <spwhitton@spwhitton.name>  Wed, 01 Jan 2020 20:51:55 +0000
 
