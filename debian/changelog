@@ -4,12 +4,8 @@ git-repair (1.20200102-1) UNRELEASED; urgency=medium
     - Tighten build-dep on optparse-applicative
     - Add build-deps on split, filepath-bytestring, attoparsec, data-default
     - Drop build-dep on missingh.
-  * Drop patches merged upstream:
-    - fix-build-with-quickcheck-2.8.2.patch
-    - patch-duplicate-arbitrary-instance-out-o.patch
-    - split-out-module-to-work-around-badly-na.patch.
-  * Refresh remaining patch, patch-common.hs-to-avoid-duplicate-impor.patch.
-    Partially applied upstream.
+  * Drop all patches.
+    Either merged upstream or obsoleted by upstream changes.
   * d/copyright updates:
     - Main project license is now AGPL-3+
     - Add stanza for Utility/Attoparsec.hs
