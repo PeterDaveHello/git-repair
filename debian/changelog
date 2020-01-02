@@ -10,6 +10,10 @@ git-repair (1.20200102-1) UNRELEASED; urgency=medium
     - split-out-module-to-work-around-badly-na.patch.
   * Refresh remaining patch, patch-common.hs-to-avoid-duplicate-impor.patch.
     Partially applied upstream.
+  * d/copyright updates:
+    - Main project license is now AGPL-3+
+    - Add stanza for Utility/Attoparsec.hs
+    - Update copyright years.
   * Stop adding upstream entries to debian/changelog.
   * wrap-and-sort -abst
 
