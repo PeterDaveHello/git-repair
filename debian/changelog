@@ -2,7 +2,7 @@ git-repair (1.20200102-1) UNRELEASED; urgency=medium
 
   * New upstream release.
     - Tighten build-dep on optparse-applicative
-    - Add build-deps on split, filepath-bytestring, attoparsec
+    - Add build-deps on split, filepath-bytestring, attoparsec, data-default
     - Drop build-dep on missingh.
   * Drop patches merged upstream:
     - fix-build-with-quickcheck-2.8.2.patch
