@@ -5,13 +5,22 @@
  - License: BSD-2-clause
  -}
 
-{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -fno-warn-tabs #-}
 
-module Utility.Misc where
+module Utility.Misc (
+	hGetContentsStrict,
+	readFileStrict,
+	separate,
+	firstLine,
+	firstLine',
+	segment,
+	segmentDelim,
+	massReplace,
+	hGetSomeString,
+	exitBool,
 
-import Utility.FileSystemEncoding
-import Utility.Monad
+	prop_segment_regressionTest,
+) where
 
 import System.IO
 import Control.Monad
@@ -19,11 +28,8 @@ import Foreign
 import Data.Char
 import Data.List
 import System.Exit
-#ifndef mingw32_HOST_OS
-import System.Posix.Process (getAnyProcessStatus)
-import Utility.Exception
-#endif
 import Control.Applicative
+import qualified Data.ByteString as S
 import Prelude
 
 {- A version of hgetContents that is not lazy. Ensures file is 
@@ -34,20 +40,6 @@ hGetContentsStrict = hGetContents >=> \s -> length s `seq` return s
 {- A version of readFile that is not lazy. -}
 readFileStrict :: FilePath -> IO String
 readFileStrict = readFile >=> \s -> length s `seq` return s
-
-{-  Reads a file strictly, and using the FileSystemEncoding, so it will
- -  never crash on a badly encoded file. -}
-readFileStrictAnyEncoding :: FilePath -> IO String
-readFileStrictAnyEncoding f = withFile f ReadMode $ \h -> do
-	fileEncoding h
-	hClose h `after` hGetContentsStrict h
-
-{- Writes a file, using the FileSystemEncoding so it will never crash
- - on a badly encoded content string. -}
-writeFileAnyEncoding :: FilePath -> String -> IO ()
-writeFileAnyEncoding f content = withFile f WriteMode $ \h -> do
-	fileEncoding h
-	hPutStr h content
 
 {- Like break, but the item matching the condition is not included
  - in the second result list.
@@ -65,6 +57,11 @@ separate c l = unbreak $ break c l
 {- Breaks out the first line. -}
 firstLine :: String -> String
 firstLine = takeWhile (/= '\n')
+
+firstLine' :: S.ByteString -> S.ByteString
+firstLine' = S.takeWhile (/= nl)
+  where
+	nl = fromIntegral (ord '\n')
 
 {- Splits a list into segments that are delimited by items matching
  - a predicate. (The delimiters are not included in the segments.)
@@ -128,22 +125,6 @@ hGetSomeString h sz = do
   where
 	peekbytes :: Int -> Ptr Word8 -> IO [Word8]
 	peekbytes len buf = mapM (peekElemOff buf) [0..pred len]
-
-{- Reaps any zombie git processes. 
- -
- - Warning: Not thread safe. Anything that was expecting to wait
- - on a process and get back an exit status is going to be confused
- - if this reap gets there first. -}
-reapZombies :: IO ()
-#ifndef mingw32_HOST_OS
-reapZombies =
-	-- throws an exception when there are no child processes
-	catchDefaultIO Nothing (getAnyProcessStatus False True)
-		>>= maybe (return ()) (const reapZombies)
-
-#else
-reapZombies = return ()
-#endif
 
 exitBool :: Bool -> IO a
 exitBool False = exitFailure

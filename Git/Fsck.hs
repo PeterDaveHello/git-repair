@@ -2,8 +2,10 @@
  -
  - Copyright 2013 Joey Hess <id@joeyh.name>
  -
- - Licensed under the GNU GPL version 3 or higher.
+ - Licensed under the GNU AGPL version 3 or higher.
  -}
+
+{-# LANGUAGE BangPatterns #-}
 
 module Git.Fsck (
 	FsckResults(..),
@@ -20,12 +22,11 @@ import Git
 import Git.Command
 import Git.Sha
 import Utility.Batch
-import qualified Git.Version
 
 import qualified Data.Set as S
 import Control.Concurrent.Async
-
-type MissingObjects = S.Set Sha
+import qualified Data.Semigroup as Sem
+import Prelude
 
 data FsckResults 
 	= FsckFoundMissing
@@ -34,6 +35,31 @@ data FsckResults
 		}
 	| FsckFailed
 	deriving (Show)
+
+data FsckOutput 
+	= FsckOutput MissingObjects Truncated
+	| NoFsckOutput
+	| AllDuplicateEntriesWarning
+
+type MissingObjects = S.Set Sha
+
+type Truncated = Bool
+
+appendFsckOutput :: FsckOutput -> FsckOutput -> FsckOutput
+appendFsckOutput (FsckOutput s1 t1) (FsckOutput s2 t2) =
+	FsckOutput (S.union s1 s2) (t1 || t2)
+appendFsckOutput (FsckOutput s t) _ = FsckOutput s t
+appendFsckOutput _ (FsckOutput s t) = FsckOutput s t
+appendFsckOutput NoFsckOutput NoFsckOutput = NoFsckOutput
+appendFsckOutput AllDuplicateEntriesWarning AllDuplicateEntriesWarning = AllDuplicateEntriesWarning
+appendFsckOutput AllDuplicateEntriesWarning NoFsckOutput = AllDuplicateEntriesWarning
+appendFsckOutput NoFsckOutput AllDuplicateEntriesWarning = AllDuplicateEntriesWarning
+
+instance Sem.Semigroup FsckOutput where
+	(<>) = appendFsckOutput
+
+instance Monoid FsckOutput where
+	mempty = NoFsckOutput
 
 {- Runs fsck to find some of the broken objects in the repository.
  - May not find all broken objects, if fsck fails on bad data in some of
@@ -46,9 +72,7 @@ data FsckResults
  -}
 findBroken :: Bool -> Repo -> IO FsckResults
 findBroken batchmode r = do
-	supportsNoDangling <- (>= Git.Version.normalize "1.7.10")
-		<$> Git.Version.installed
-	let (command, params) = ("git", fsckParams supportsNoDangling r)
+	let (command, params) = ("git", fsckParams r)
 	(command', params') <- if batchmode
 		then toBatchCommand (command, params)
 		else return (command, params)
@@ -58,18 +82,24 @@ findBroken batchmode r = do
 			{ std_out = CreatePipe
 			, std_err = CreatePipe
 			}
-	(bad1, bad2) <- concurrently
-		(readMissingObjs maxobjs r supportsNoDangling (stdoutHandle p))
-		(readMissingObjs maxobjs r supportsNoDangling (stderrHandle p))
+	(o1, o2) <- concurrently
+		(parseFsckOutput maxobjs r (stdoutHandle p))
+		(parseFsckOutput maxobjs r (stderrHandle p))
 	fsckok <- checkSuccessProcess pid
-	let truncated = S.size bad1 == maxobjs || S.size bad1 == maxobjs
-	let badobjs = S.union bad1 bad2
-
-	if S.null badobjs && not fsckok
-		then return FsckFailed
-		else return $ FsckFoundMissing badobjs truncated
+	case mappend o1 o2 of
+		FsckOutput badobjs truncated
+			| S.null badobjs && not fsckok -> return FsckFailed
+			| otherwise -> return $ FsckFoundMissing badobjs truncated
+		NoFsckOutput
+			| not fsckok -> return FsckFailed
+			| otherwise -> return noproblem
+		-- If all fsck output was duplicateEntries warnings,
+		-- the repository is not broken, it just has some unusual
+		-- tree objects in it. So ignore nonzero exit status.
+		AllDuplicateEntriesWarning -> return noproblem
   where
 	maxobjs = 10000
+	noproblem = FsckFoundMissing S.empty False
 
 foundBroken :: FsckResults -> Bool
 foundBroken FsckFailed = True
@@ -87,10 +117,18 @@ knownMissing (FsckFoundMissing s _) = s
 findMissing :: [Sha] -> Repo -> IO MissingObjects
 findMissing objs r = S.fromList <$> filterM (`isMissing` r) objs
 
-readMissingObjs :: Int -> Repo -> Bool -> Handle -> IO MissingObjects
-readMissingObjs maxobjs r supportsNoDangling h = do
-	objs <- take maxobjs . findShas supportsNoDangling <$> hGetContents h
-	findMissing objs r
+parseFsckOutput :: Int -> Repo -> Handle -> IO FsckOutput
+parseFsckOutput maxobjs r h = do
+	ls <- lines <$> hGetContents h
+	if null ls
+		then return NoFsckOutput
+		else if all ("duplicateEntries" `isInfixOf`) ls
+			then return AllDuplicateEntriesWarning
+			else do
+				let shas = findShas ls
+				let !truncated = length shas > maxobjs
+				missingobjs <- findMissing (take maxobjs shas) r
+				return $ FsckOutput missingobjs truncated
 
 isMissing :: Sha -> Repo -> IO Bool
 isMissing s r = either (const True) (const False) <$> tryIO dump
@@ -100,18 +138,14 @@ isMissing s r = either (const True) (const False) <$> tryIO dump
 		, Param (fromRef s)
 		] r
 
-findShas :: Bool -> String -> [Sha]
-findShas supportsNoDangling = catMaybes . map extractSha . concat . map words . filter wanted . lines
+findShas :: [String] -> [Sha]
+findShas = catMaybes . map extractSha . concat . map words . filter wanted
   where
-	wanted l
-		| supportsNoDangling = True
-		| otherwise = not ("dangling " `isPrefixOf` l)
+	wanted l = not ("dangling " `isPrefixOf` l)
 
-fsckParams :: Bool -> Repo -> [CommandParam]
-fsckParams supportsNoDangling = gitCommandLine $ map Param $ catMaybes
-	[ Just "fsck"
-	, if supportsNoDangling
-		then Just "--no-dangling"
-		else Nothing
-	, Just "--no-reflogs"
+fsckParams :: Repo -> [CommandParam]
+fsckParams = gitCommandLine $ map Param
+	[ "fsck"
+	, "--no-dangling"
+	, "--no-reflogs"
 	]

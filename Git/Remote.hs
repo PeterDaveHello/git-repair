@@ -2,10 +2,11 @@
  -
  - Copyright 2012 Joey Hess <id@joeyh.name>
  -
- - Licensed under the GNU GPL version 3 or higher.
+ - Licensed under the GNU AGPL version 3 or higher.
  -}
 
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Git.Remote where
 
@@ -15,10 +16,21 @@ import Git.Types
 
 import Data.Char
 import qualified Data.Map as M
+import qualified Data.ByteString as S
+import qualified Data.ByteString.Char8 as S8
 import Network.URI
 #ifdef mingw32_HOST_OS
 import Git.FilePath
 #endif
+
+{- Is a git config key one that specifies the location of a remote? -}
+isRemoteKey :: ConfigKey -> Bool
+isRemoteKey (ConfigKey k) = "remote." `S.isPrefixOf` k && ".url" `S.isSuffixOf` k
+
+{- Get a remote's name from the config key that specifies its location. -}
+remoteKeyToRemoteName :: ConfigKey -> RemoteName
+remoteKeyToRemoteName (ConfigKey k) = decodeBS' $
+	S.intercalate "." $ dropFromEnd 1 $ drop 1 $ S8.split '.' k
 
 {- Construct a legal git remote name out of an arbitrary input string.
  -
@@ -43,6 +55,7 @@ makeLegalName s = case filter legal $ replace "/" "_" s of
 	legal c = isAlphaNum c
 	
 data RemoteLocation = RemoteUrl String | RemotePath FilePath
+	deriving (Eq)
 
 remoteLocationIsUrl :: RemoteLocation -> Bool
 remoteLocationIsUrl (RemoteUrl _) = True
@@ -67,16 +80,16 @@ parseRemoteLocation s repo = ret $ calcloc s
 	-- insteadof config can rewrite remote location
 	calcloc l
 		| null insteadofs = l
-		| otherwise = replacement ++ drop (length bestvalue) l
+		| otherwise = replacement ++ drop (S.length bestvalue) l
 	  where
-		replacement = drop (length prefix) $
-			take (length bestkey - length suffix) bestkey
-		(bestkey, bestvalue) = maximumBy longestvalue insteadofs
+		replacement = decodeBS' $ S.drop (S.length prefix) $
+			S.take (S.length bestkey - S.length suffix) bestkey
+		(ConfigKey bestkey, ConfigValue bestvalue) = maximumBy longestvalue insteadofs
 		longestvalue (_, a) (_, b) = compare b a
-		insteadofs = filterconfig $ \(k, v) -> 
-			startswith prefix k &&
-			endswith suffix k &&
-			startswith v l
+		insteadofs = filterconfig $ \(ConfigKey k, ConfigValue v) -> 
+			prefix `S.isPrefixOf` k &&
+			suffix `S.isSuffixOf` k &&
+			v `S.isPrefixOf` encodeBS l
 		filterconfig f = filter f $
 			concatMap splitconfigs $ M.toList $ fullconfig repo
 		splitconfigs (k, vs) = map (\v -> (k, v)) vs
@@ -104,5 +117,5 @@ parseRemoteLocation s repo = ret $ calcloc s
 	-- git on Windows will write a path to .git/config with "drive:",
 	-- which is not to be confused with a "host:"
 	dosstyle = hasDrive
-	dospath = fromInternalGitPath
+	dospath = fromRawFilePath . fromInternalGitPath . toRawFilePath
 #endif

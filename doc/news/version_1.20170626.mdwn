@@ -1,0 +1,5 @@
+git-repair 1.20170626 released with [[!toggle text="these changes"]]
+[[!toggleable text="""
+   * Merge from git-annex.
+   * Removes dependency on MissingH, adding a dependency on split instead.
+   * Fixes build with directory-1.3."""]]

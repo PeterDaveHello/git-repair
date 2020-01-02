@@ -4,7 +4,7 @@
  -
  - Copyright 2013, 2014 Joey Hess <joey@kitenet.net>
  -
- - Licensed under the GNU GPL version 3 or higher.
+ - Licensed under the GNU AGPL version 3 or higher.
  -}
 
 module Git.Destroyer (
@@ -83,7 +83,7 @@ generateDamage = sample' (arbitrary :: Gen Damage)
 applyDamage :: [Damage] -> Repo -> IO ()
 applyDamage ds r = do
 	contents <- sort . filter (not . skipped)
-		<$> dirContentsRecursive (localGitDir r)
+		<$> dirContentsRecursive (fromRawFilePath (localGitDir r))
 	forM_ ds $ \d -> do
 		let withfile s a = do
 			let f = selectFile contents s

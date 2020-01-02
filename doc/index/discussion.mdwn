@@ -1,0 +1,12 @@
+My experience with git repair:
+
+git repair
+Running git fsck ...
+Stack space overflow: current size 8388608 bytes.
+Use `+RTS -Ksize -RTS' to increase it.
+
+git repair +RTS -K32M -RTS
+git-repair: Most RTS options are disabled. Link with -rtsopts to enable them.
+
+Whats up guys? Are we playing catch 22 here?
+

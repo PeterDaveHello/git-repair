@@ -5,30 +5,45 @@
  - License: BSD-2-clause
  -}
 
-{-# LANGUAGE PackageImports, CPP #-}
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -fno-warn-tabs #-}
 
-module Utility.Path where
+module Utility.Path (
+	simplifyPath,
+	absPathFrom,
+	parentDir,
+	upFrom,
+	dirContains,
+	absPath,
+	relPathCwdToFile,
+	relPathDirToFile,
+	relPathDirToFileAbs,
+	segmentPaths,
+	runSegmentPaths,
+	relHome,
+	inPath,
+	searchPath,
+	dotfile,
+	sanitizeFilePath,
+	splitShortExtensions,
 
-import Data.String.Utils
+	prop_upFrom_basics,
+	prop_relPathDirToFile_basics,
+	prop_relPathDirToFile_regressionTest,
+) where
+
 import System.FilePath
-import System.Directory
 import Data.List
 import Data.Maybe
 import Data.Char
 import Control.Applicative
 import Prelude
 
-#ifdef mingw32_HOST_OS
-import qualified System.FilePath.Posix as Posix
-#else
-import System.Posix.Files
-import Utility.Exception
-#endif
-
-import qualified "MissingH" System.Path as MissingH
 import Utility.Monad
 import Utility.UserInfo
+import Utility.Directory
+import Utility.Split
+import Utility.FileSystemEncoding
 
 {- Simplifies a path, removing any "." component, collapsing "dir/..", 
  - and removing the trailing path separator.
@@ -60,25 +75,13 @@ simplifyPath path = dropTrailingPathSeparator $
 {- Makes a path absolute.
  -
  - The first parameter is a base directory (ie, the cwd) to use if the path
- - is not already absolute.
+ - is not already absolute, and should itsef be absolute.
  -
  - Does not attempt to deal with edge cases or ensure security with
  - untrusted inputs.
  -}
 absPathFrom :: FilePath -> FilePath -> FilePath
 absPathFrom dir path = simplifyPath (combine dir path)
-
-{- On Windows, this converts the paths to unix-style, in order to run
- - MissingH's absNormPath on them. -}
-absNormPathUnix :: FilePath -> FilePath -> Maybe FilePath
-#ifndef mingw32_HOST_OS
-absNormPathUnix dir path = MissingH.absNormPath dir path
-#else
-absNormPathUnix dir path = todos <$> MissingH.absNormPath (fromdos dir) (fromdos path)
-  where
-	fromdos = replace "\\" "/"
-	todos = replace "/" "\\"
-#endif
 
 {- takeDirectory "foo/bar/" is "foo/bar". This instead yields "foo" -}
 parentDir :: FilePath -> FilePath
@@ -89,12 +92,13 @@ parentDir = takeDirectory . dropTrailingPathSeparator
 upFrom :: FilePath -> Maybe FilePath
 upFrom dir
 	| length dirs < 2 = Nothing
-	| otherwise = Just $ joinDrive drive (intercalate s $ init dirs)
+	| otherwise = Just $ joinDrive drive $ intercalate s $ init dirs
   where
-	-- on Unix, the drive will be "/" when the dir is absolute, otherwise ""
+	-- on Unix, the drive will be "/" when the dir is absolute,
+	-- otherwise ""
 	(drive, path) = splitDrive dir
-	dirs = filter (not . null) $ split s path
 	s = [pathSeparator]
+	dirs = filter (not . null) $ split s path
 
 prop_upFrom_basics :: FilePath -> Bool
 prop_upFrom_basics dir
@@ -109,7 +113,10 @@ prop_upFrom_basics dir
  - are all equivilant.
  -}
 dirContains :: FilePath -> FilePath -> Bool
-dirContains a b = a == b || a' == b' || (addTrailingPathSeparator a') `isPrefixOf` b'
+dirContains a b = a == b
+	|| a' == b'
+	|| (addTrailingPathSeparator a') `isPrefixOf` b'
+	|| a' == "." && normalise ("." </> b') == b'
   where
 	a' = norm a
 	b' = norm b
@@ -148,17 +155,22 @@ relPathDirToFile from to = relPathDirToFileAbs <$> absPath from <*> absPath to
  -}
 relPathDirToFileAbs :: FilePath -> FilePath -> FilePath
 relPathDirToFileAbs from to
-	| takeDrive from /= takeDrive to = to
-	| otherwise = intercalate s $ dotdots ++ uncommon
+#ifdef mingw32_HOST_OS
+	| normdrive from /= normdrive to = to
+#endif
+	| otherwise = joinPath $ dotdots ++ uncommon
   where
-	s = [pathSeparator]
-	pfrom = split s from
-	pto = split s to
+	pfrom = sp from
+	pto = sp to
+	sp = map dropTrailingPathSeparator . splitPath . dropDrive
 	common = map fst $ takeWhile same $ zip pfrom pto
 	same (c,d) = c == d
 	uncommon = drop numcommon pto
 	dotdots = replicate (length pfrom - numcommon) ".."
 	numcommon = length common
+#ifdef mingw32_HOST_OS
+	normdrive = map toLower . takeWhile (/= ':') . takeDrive
+#endif
 
 prop_relPathDirToFile_basics :: FilePath -> FilePath -> Bool
 prop_relPathDirToFile_basics from to
@@ -192,20 +204,21 @@ prop_relPathDirToFile_regressionTest = same_dir_shortcurcuits_at_difference
  - we stop preserving ordering at that point. Presumably a user passing
  - that many paths in doesn't care too much about order of the later ones.
  -}
-segmentPaths :: [FilePath] -> [FilePath] -> [[FilePath]]
+segmentPaths :: [RawFilePath] -> [RawFilePath] -> [[RawFilePath]]
 segmentPaths [] new = [new]
 segmentPaths [_] new = [new] -- optimisation
 segmentPaths (l:ls) new = found : segmentPaths ls rest
   where
 	(found, rest) = if length ls < 100
-		then partition (l `dirContains`) new
-		else break (\p -> not (l `dirContains` p)) new
+		then partition inl new
+		else break (not . inl) new
+	inl f = fromRawFilePath l `dirContains` fromRawFilePath f
 
 {- This assumes that it's cheaper to call segmentPaths on the result,
  - than it would be to run the action separately with each path. In
  - the case of git file list commands, that assumption tends to hold.
  -}
-runSegmentPaths :: ([FilePath] -> IO [FilePath]) -> [FilePath] -> IO [[FilePath]]
+runSegmentPaths :: ([RawFilePath] -> IO [RawFilePath]) -> [RawFilePath] -> IO [[RawFilePath]]
 runSegmentPaths a paths = segmentPaths paths <$> a paths
 
 {- Converts paths in the home directory to use ~/ -}
@@ -227,6 +240,8 @@ inPath command = isJust <$> searchPath command
  -
  - The command may be fully qualified already, in which case it will
  - be returned if it exists.
+ -
+ - Note that this will find commands in PATH that are not executable.
  -}
 searchPath :: String -> IO (Maybe FilePath)
 searchPath command
@@ -251,44 +266,6 @@ dotfile file
 	| otherwise = "." `isPrefixOf` f || dotfile (takeDirectory file)
   where
 	f = takeFileName file
-
-{- Converts a DOS style path to a Cygwin style path. Only on Windows.
- - Any trailing '\' is preserved as a trailing '/' -}
-toCygPath :: FilePath -> FilePath
-#ifndef mingw32_HOST_OS
-toCygPath = id
-#else
-toCygPath p
-	| null drive = recombine parts
-	| otherwise = recombine $ "/cygdrive" : driveletter drive : parts
-  where
-	(drive, p') = splitDrive p
-	parts = splitDirectories p'
-	driveletter = map toLower . takeWhile (/= ':')
-	recombine = fixtrailing . Posix.joinPath
-	fixtrailing s
-		| hasTrailingPathSeparator p = Posix.addTrailingPathSeparator s
-		| otherwise = s
-#endif
-
-{- Maximum size to use for a file in a specified directory.
- -
- - Many systems have a 255 byte limit to the name of a file, 
- - so that's taken as the max if the system has a larger limit, or has no
- - limit.
- -}
-fileNameLengthLimit :: FilePath -> IO Int
-#ifdef mingw32_HOST_OS
-fileNameLengthLimit _ = return 255
-#else
-fileNameLengthLimit dir = do
-	-- getPathVar can fail due to statfs(2) overflow
-	l <- catchDefaultIO 0 $
-		fromIntegral <$> getPathVar dir FileNameLimit
-	if l <= 0
-		then return 255
-		else return $ minimum [l, 255]
-#endif
 
 {- Given a string that we'd like to use as the basis for FilePath, but that
  - was provided by a third party and is not to be trusted, returns the closest

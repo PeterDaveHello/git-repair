@@ -1,13 +1,15 @@
 {- git ls-files interface
  -
- - Copyright 2010,2012 Joey Hess <id@joeyh.name>
+ - Copyright 2010-2018 Joey Hess <id@joeyh.name>
  -
- - Licensed under the GNU GPL version 3 or higher.
+ - Licensed under the GNU AGPL version 3 or higher.
  -}
 
 module Git.LsFiles (
 	inRepo,
+	inRepoOrBranch,
 	notInRepo,
+	notInRepoIncludingEmptyDirectories,
 	allFiles,
 	deleted,
 	modified,
@@ -32,69 +34,89 @@ import Git.Sha
 
 import Numeric
 import System.Posix.Types
+import qualified Data.ByteString.Lazy as L
 
-{- Scans for files that are checked into git at the specified locations. -}
-inRepo :: [FilePath] -> Repo -> IO ([FilePath], IO Bool)
-inRepo l = pipeNullSplit $ 
-	Param "ls-files" :
-	Param "--cached" :
-	Param "-z" :
-	Param "--" :
-	map File l
+{- Scans for files that are checked into git's index at the specified locations. -}
+inRepo :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+inRepo = inRepo' [] 
+
+inRepo' :: [CommandParam] -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+inRepo' ps l repo = pipeNullSplit' params repo
+  where
+	params = 
+		Param "ls-files" :
+		Param "--cached" :
+		Param "-z" :
+		ps ++
+		(Param "--" : map (File . fromRawFilePath) l)
+
+{- Files that are checked into the index or have been committed to a
+ - branch. -}
+inRepoOrBranch :: Branch -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+inRepoOrBranch (Ref b) = inRepo' [Param $ "--with-tree=" ++ b]
 
 {- Scans for files at the specified locations that are not checked into git. -}
-notInRepo :: Bool -> [FilePath] -> Repo -> IO ([FilePath], IO Bool)
-notInRepo include_ignored l repo = pipeNullSplit params repo
+notInRepo :: Bool -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+notInRepo = notInRepo' []
+
+notInRepo' :: [CommandParam] -> Bool -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+notInRepo' ps include_ignored l repo = pipeNullSplit' params repo
   where
 	params = concat
 		[ [ Param "ls-files", Param "--others"]
+		, ps
 		, exclude
 		, [ Param "-z", Param "--" ]
-		, map File l
+		, map (File . fromRawFilePath) l
 		]
 	exclude
 		| include_ignored = []
 		| otherwise = [Param "--exclude-standard"]
 
+{- Scans for files at the specified locations that are not checked into
+ - git. Empty directories are included in the result. -}
+notInRepoIncludingEmptyDirectories :: Bool -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+notInRepoIncludingEmptyDirectories = notInRepo' [Param "--directory"]
+
 {- Finds all files in the specified locations, whether checked into git or
  - not. -}
-allFiles :: [FilePath] -> Repo -> IO ([FilePath], IO Bool)
-allFiles l = pipeNullSplit $
+allFiles :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+allFiles l = pipeNullSplit' $
 	Param "ls-files" :
 	Param "--cached" :
 	Param "--others" :
 	Param "-z" :
 	Param "--" :
-	map File l
+	map (File . fromRawFilePath) l
 
 {- Returns a list of files in the specified locations that have been
  - deleted. -}
-deleted :: [FilePath] -> Repo -> IO ([FilePath], IO Bool)
-deleted l repo = pipeNullSplit params repo
+deleted :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+deleted l repo = pipeNullSplit' params repo
   where
 	params =
 		Param "ls-files" :
 		Param "--deleted" :
 		Param "-z" :
 		Param "--" :
-		map File l
+		map (File . fromRawFilePath) l
 
 {- Returns a list of files in the specified locations that have been
  - modified. -}
-modified :: [FilePath] -> Repo -> IO ([FilePath], IO Bool)
-modified l repo = pipeNullSplit params repo
+modified :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+modified l repo = pipeNullSplit' params repo
   where
 	params = 
 		Param "ls-files" :
 		Param "--modified" :
 		Param "-z" :
 		Param "--" :
-		map File l
+		map (File . fromRawFilePath) l
 
 {- Files that have been modified or are not checked into git (and are not
  - ignored). -}
-modifiedOthers :: [FilePath] -> Repo -> IO ([FilePath], IO Bool)
-modifiedOthers l repo = pipeNullSplit params repo
+modifiedOthers :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+modifiedOthers l repo = pipeNullSplit' params repo
   where
 	params = 
 		Param "ls-files" :
@@ -103,69 +125,69 @@ modifiedOthers l repo = pipeNullSplit params repo
 		Param "--exclude-standard" :
 		Param "-z" :
 		Param "--" :
-		map File l
+		map (File . fromRawFilePath) l
 
 {- Returns a list of all files that are staged for commit. -}
-staged :: [FilePath] -> Repo -> IO ([FilePath], IO Bool)
+staged :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
 staged = staged' []
 
 {- Returns a list of the files, staged for commit, that are being added,
  - moved, or changed (but not deleted), from the specified locations. -}
-stagedNotDeleted :: [FilePath] -> Repo -> IO ([FilePath], IO Bool)
+stagedNotDeleted :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
 stagedNotDeleted = staged' [Param "--diff-filter=ACMRT"]
 
-staged' :: [CommandParam] -> [FilePath] -> Repo -> IO ([FilePath], IO Bool)
-staged' ps l = pipeNullSplit $ prefix ++ ps ++ suffix
+staged' :: [CommandParam] -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+staged' ps l repo = pipeNullSplit' (prefix ++ ps ++ suffix) repo
   where
 	prefix = [Param "diff", Param "--cached", Param "--name-only", Param "-z"]
-	suffix = Param "--" : map File l
+	suffix = Param "--" : map (File . fromRawFilePath) l
 
-type StagedDetails = (FilePath, Maybe Sha, Maybe FileMode)
+type StagedDetails = (RawFilePath, Maybe Sha, Maybe FileMode)
 
 {- Returns details about files that are staged in the index,
  - as well as files not yet in git. Skips ignored files. -}
-stagedOthersDetails :: [FilePath] -> Repo -> IO ([StagedDetails], IO Bool)
+stagedOthersDetails :: [RawFilePath] -> Repo -> IO ([StagedDetails], IO Bool)
 stagedOthersDetails = stagedDetails' [Param "--others", Param "--exclude-standard"]
 
 {- Returns details about all files that are staged in the index. -}
-stagedDetails :: [FilePath] -> Repo -> IO ([StagedDetails], IO Bool)
+stagedDetails :: [RawFilePath] -> Repo -> IO ([StagedDetails], IO Bool)
 stagedDetails = stagedDetails' []
 
 {- Gets details about staged files, including the Sha of their staged
  - contents. -}
-stagedDetails' :: [CommandParam] -> [FilePath] -> Repo -> IO ([StagedDetails], IO Bool)
+stagedDetails' :: [CommandParam] -> [RawFilePath] -> Repo -> IO ([StagedDetails], IO Bool)
 stagedDetails' ps l repo = do
 	(ls, cleanup) <- pipeNullSplit params repo
 	return (map parse ls, cleanup)
   where
 	params = Param "ls-files" : Param "--stage" : Param "-z" : ps ++ 
-		Param "--" : map File l
+		Param "--" : map (File . fromRawFilePath) l
 	parse s
-		| null file = (s, Nothing, Nothing)
-		| otherwise = (file, extractSha $ take shaSize rest, readmode mode)
+		| null file = (L.toStrict s, Nothing, Nothing)
+		| otherwise = (toRawFilePath file, extractSha $ take shaSize rest, readmode mode)
 	  where
-		(metadata, file) = separate (== '\t') s
+		(metadata, file) = separate (== '\t') (decodeBL' s)
 		(mode, rest) = separate (== ' ') metadata
 		readmode = fst <$$> headMaybe . readOct
 
 {- Returns a list of the files in the specified locations that are staged
  - for commit, and whose type has changed. -}
-typeChangedStaged :: [FilePath] -> Repo -> IO ([FilePath], IO Bool)
+typeChangedStaged :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
 typeChangedStaged = typeChanged' [Param "--cached"]
 
 {- Returns a list of the files in the specified locations whose type has
  - changed.  Files only staged for commit will not be included. -}
-typeChanged :: [FilePath] -> Repo -> IO ([FilePath], IO Bool)
+typeChanged :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
 typeChanged = typeChanged' []
 
-typeChanged' :: [CommandParam] -> [FilePath] -> Repo -> IO ([FilePath], IO Bool)
+typeChanged' :: [CommandParam] -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
 typeChanged' ps l repo = do
 	(fs, cleanup) <- pipeNullSplit (prefix ++ ps ++ suffix) repo
 	-- git diff returns filenames relative to the top of the git repo;
 	-- convert to filenames relative to the cwd, like git ls-files.
-	top <- absPath (repoPath repo)
+	top <- absPath (fromRawFilePath (repoPath repo))
 	currdir <- getCurrentDirectory
-	return (map (\f -> relPathDirToFileAbs currdir $ top </> f) fs, cleanup)
+	return (map (\f -> toRawFilePath (relPathDirToFileAbs currdir $ top </> decodeBL' f)) fs, cleanup)
   where
 	prefix = 
 		[ Param "diff"
@@ -173,7 +195,7 @@ typeChanged' ps l repo = do
 		, Param "--diff-filter=T"
 		, Param "-z"
 		]
-	suffix = Param "--" : (if null l then [File "."] else map File l)
+	suffix = Param "--" : (if null l then [File "."] else map (File . fromRawFilePath) l)
 
 {- A item in conflict has two possible values.
  - Either can be Nothing, when that side deleted the file. -}
@@ -183,10 +205,10 @@ data Conflicting v = Conflicting
 	} deriving (Show)
 
 data Unmerged = Unmerged
-	{ unmergedFile :: FilePath
-	, unmergedBlobType :: Conflicting BlobType
+	{ unmergedFile :: RawFilePath
+	, unmergedTreeItemType :: Conflicting TreeItemType
 	, unmergedSha :: Conflicting Sha
-	} deriving (Show)
+	}
 
 {- Returns a list of the files in the specified locations that have
  - unresolved merge conflicts.
@@ -198,38 +220,38 @@ data Unmerged = Unmerged
  -   3 = them
  - If a line is omitted, that side removed the file.
  -}
-unmerged :: [FilePath] -> Repo -> IO ([Unmerged], IO Bool)
+unmerged :: [RawFilePath] -> Repo -> IO ([Unmerged], IO Bool)
 unmerged l repo = do
 	(fs, cleanup) <- pipeNullSplit params repo
-	return (reduceUnmerged [] $ catMaybes $ map parseUnmerged fs, cleanup)
+	return (reduceUnmerged [] $ catMaybes $ map (parseUnmerged . decodeBL') fs, cleanup)
   where
 	params = 
 		Param "ls-files" :
 		Param "--unmerged" :
 		Param "-z" :
 		Param "--" :
-		map File l
+		map (File . fromRawFilePath) l
 
 data InternalUnmerged = InternalUnmerged
 	{ isus :: Bool
-	, ifile :: FilePath
-	, iblobtype :: Maybe BlobType
+	, ifile :: RawFilePath
+	, itreeitemtype :: Maybe TreeItemType
 	, isha :: Maybe Sha
-	} deriving (Show)
+	}
 
 parseUnmerged :: String -> Maybe InternalUnmerged
 parseUnmerged s
 	| null file = Nothing
 	| otherwise = case words metadata of
-		(rawblobtype:rawsha:rawstage:_) -> do
+		(rawtreeitemtype:rawsha:rawstage:_) -> do
 			stage <- readish rawstage :: Maybe Int
 			if stage /= 2 && stage /= 3
 				then Nothing
 				else do
-					blobtype <- readBlobType rawblobtype
+					treeitemtype <- readTreeItemType (encodeBS rawtreeitemtype)
 					sha <- extractSha rawsha
-					return $ InternalUnmerged (stage == 2) file
-						(Just blobtype) (Just sha)
+					return $ InternalUnmerged (stage == 2) (toRawFilePath file)
+						(Just treeitemtype) (Just sha)
 		_ -> Nothing
   where
 	(metadata, file) = separate (== '\t') s
@@ -239,12 +261,12 @@ reduceUnmerged c [] = c
 reduceUnmerged c (i:is) = reduceUnmerged (new:c) rest
   where
 	(rest, sibi) = findsib i is
-	(blobtypeA, blobtypeB, shaA, shaB)
-		| isus i    = (iblobtype i, iblobtype sibi, isha i, isha sibi)
-		| otherwise = (iblobtype sibi, iblobtype i, isha sibi, isha i)
+	(treeitemtypeA, treeitemtypeB, shaA, shaB)
+		| isus i    = (itreeitemtype i, itreeitemtype sibi, isha i, isha sibi)
+		| otherwise = (itreeitemtype sibi, itreeitemtype i, isha sibi, isha i)
 	new = Unmerged
 		{ unmergedFile = ifile i
-		, unmergedBlobType = Conflicting blobtypeA blobtypeB
+		, unmergedTreeItemType = Conflicting treeitemtypeA treeitemtypeB
 		, unmergedSha = Conflicting shaA shaB
 		}
 	findsib templatei [] = ([], removed templatei)
@@ -253,6 +275,6 @@ reduceUnmerged c (i:is) = reduceUnmerged (new:c) rest
 		| otherwise = (l:ls, removed templatei)
 	removed templatei = templatei
 		{ isus = not (isus templatei)
-		, iblobtype = Nothing
+		, itreeitemtype = Nothing
 		, isha = Nothing
 		}

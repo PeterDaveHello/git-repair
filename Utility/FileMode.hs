@@ -1,6 +1,6 @@
 {- File mode utilities.
  -
- - Copyright 2010-2012 Joey Hess <id@joeyh.name>
+ - Copyright 2010-2017 Joey Hess <id@joeyh.name>
  -
  - License: BSD-2-clause
  -}
@@ -15,12 +15,13 @@ module Utility.FileMode (
 import System.IO
 import Control.Monad
 import System.PosixCompat.Types
-import Utility.PosixFiles
+import System.PosixCompat.Files
 #ifndef mingw32_HOST_OS
-import System.Posix.Files
+import System.Posix.Files (symbolicLinkMode)
+import Control.Monad.IO.Class (liftIO)
 #endif
+import Control.Monad.IO.Class (MonadIO)
 import Foreign (complement)
-import Control.Monad.IO.Class (liftIO, MonadIO)
 import Control.Monad.Catch
 
 import Utility.Exception
@@ -68,6 +69,7 @@ otherGroupModes :: [FileMode]
 otherGroupModes = 
 	[ groupReadMode, otherReadMode
 	, groupWriteMode, otherWriteMode
+	, groupExecuteMode, otherExecuteMode
 	]
 
 {- Removes the write bits from a file. -}
@@ -129,6 +131,21 @@ withUmask umask a = bracket setup cleanup go
 withUmask _ a = a
 #endif
 
+getUmask :: IO FileMode
+#ifndef mingw32_HOST_OS
+getUmask = bracket setup cleanup return
+  where
+	setup = setFileCreationMask nullFileMode
+	cleanup = setFileCreationMask
+#else
+getUmask = return nullFileMode
+#endif
+
+defaultFileMode :: IO FileMode
+defaultFileMode = do
+	umask <- getUmask
+	return $ intersectFileModes (complement umask) stdFileMode
+
 combineModes :: [FileMode] -> FileMode
 combineModes [] = 0
 combineModes [m] = m
@@ -161,7 +178,10 @@ writeFileProtected file content = writeFileProtected' file
 	(\h -> hPutStr h content)
 
 writeFileProtected' :: FilePath -> (Handle -> IO ()) -> IO ()
-writeFileProtected' file writer = withUmask 0o0077 $
+writeFileProtected' file writer = protectedOutput $
 	withFile file WriteMode $ \h -> do
 		void $ tryIO $ modifyFileMode file $ removeModes otherGroupModes
 		writer h
+
+protectedOutput :: IO a -> IO a
+protectedOutput = withUmask 0o0077

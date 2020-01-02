@@ -1,14 +1,16 @@
-{- Tests the system and generates Build.SysConfig.hs. -}
+{- Tests the system and generates SysConfig. -}
+
+{-# OPTIONS_GHC -fno-warn-tabs #-}
 
 module Build.TestConfig where
 
 import Utility.Path
 import Utility.Monad
 import Utility.SafeCommand
+import Utility.Directory
 
 import System.IO
 import System.FilePath
-import System.Directory
 
 type ConfigKey = String
 data ConfigValue =
@@ -40,12 +42,11 @@ instance Show Config where
 		valuetype (MaybeBoolConfig _) = "Maybe Bool"
 
 writeSysConfig :: [Config] -> IO ()
-writeSysConfig config = writeFile "Build/SysConfig.hs" body
+writeSysConfig config = writeFile "Build/SysConfig" body
   where
 	body = unlines $ header ++ map show config ++ footer
 	header = [
 		  "{- Automatically generated. -}"
-		, "module Build.SysConfig where"
 		, ""
 		]
 	footer = []
@@ -58,18 +59,6 @@ runTests (TestCase tname t : ts) = do
 	testEnd c
 	rest <- runTests ts
 	return $ c:rest
-
-{- Tests that a command is available, aborting if not. -}
-requireCmd :: ConfigKey -> String -> Test
-requireCmd k cmdline = do
-	ret <- testCmd k cmdline
-	handle ret
-  where
-	handle r@(Config _ (BoolConfig True)) = return r
-	handle r = do
-		testEnd r
-		error $ "** the " ++ c ++ " command is required"
-	c = head $ words cmdline
 
 {- Checks if a command is available by running a command line. -}
 testCmd :: ConfigKey -> String -> Test

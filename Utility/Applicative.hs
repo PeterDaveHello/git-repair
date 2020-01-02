@@ -5,7 +5,11 @@
  - License: BSD-2-clause
  -}
 
-module Utility.Applicative where
+{-# OPTIONS_GHC -fno-warn-tabs #-}
+
+module Utility.Applicative (
+	(<$$>),
+) where
 
 {- Like <$> , but supports one level of currying.
  - 

@@ -2,12 +2,23 @@
  - bugs.
  -
  - This exports functions that conflict with the prelude, which avoids
- - them being accidentially used.
+ - them being accidentally used.
  -}
 
 {-# OPTIONS_GHC -fno-warn-tabs #-}
 
-module Utility.PartialPrelude where
+module Utility.PartialPrelude (
+	Utility.PartialPrelude.read,
+	Utility.PartialPrelude.head,
+	Utility.PartialPrelude.tail,
+	Utility.PartialPrelude.init,
+	Utility.PartialPrelude.last,
+	Utility.PartialPrelude.readish,
+	Utility.PartialPrelude.headMaybe,
+	Utility.PartialPrelude.lastMaybe,
+	Utility.PartialPrelude.beginning,
+	Utility.PartialPrelude.end,
+) where
 
 import qualified Data.Maybe
 
@@ -38,11 +49,9 @@ last = Prelude.last
 
 {- Attempts to read a value from a String.
  -
- - Ignores leading/trailing whitespace, and throws away any trailing
- - text after the part that can be read.
- -
- - readMaybe is available in Text.Read in new versions of GHC,
- - but that one requires the entire string to be consumed.
+ - Unlike Text.Read.readMaybe, this ignores some trailing text
+ - after the part that can be read. However, if the trailing text looks
+ - like another readable value, it fails.
  -}
 readish :: Read a => String -> Maybe a
 readish s = case reads s of

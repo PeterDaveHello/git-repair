@@ -2,7 +2,7 @@
  -
  - Copyright 2013 Joey Hess <id@joeyh.name>
  -
- - Licensed under the GNU GPL version 3 or higher.
+ - Licensed under the GNU AGPL version 3 or higher.
  -}
 
 module Git.Objects where
@@ -12,7 +12,7 @@ import Git
 import Git.Sha
 
 objectsDir :: Repo -> FilePath
-objectsDir r = localGitDir r </> "objects"
+objectsDir r = fromRawFilePath (localGitDir r) </> "objects"
 
 packDir :: Repo -> FilePath
 packDir r = objectsDir r </> "pack"
