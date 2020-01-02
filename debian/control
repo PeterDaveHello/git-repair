@@ -1,25 +1,25 @@
 Source: git-repair
 Section: utils
 Priority: optional
-Build-Depends: 
-	debhelper (>= 9),
-	ghc,
-	git,
-	libghc-hslogger-dev,
-	libghc-network-dev,
-	libghc-exceptions-dev (>= 0.6),
-	libghc-transformers-dev,
-	libghc-unix-compat-dev,
-	libghc-ifelse-dev,
-	libghc-text-dev,
-	libghc-quickcheck2-dev,
-	libghc-utf8-string-dev,
-	libghc-async-dev,
-	libghc-split-dev,
-	libghc-optparse-applicative-dev (>= 0.14.1),
-	libghc-network-uri-dev,
-        libghc-filepath-bytestring-dev (>= 1.4.2.1.0),
-        libghc-attoparsec-dev,
+Build-Depends:
+ debhelper (>= 9),
+ ghc,
+ git,
+ libghc-async-dev,
+ libghc-attoparsec-dev,
+ libghc-exceptions-dev (>= 0.6),
+ libghc-filepath-bytestring-dev (>= 1.4.2.1.0),
+ libghc-hslogger-dev,
+ libghc-ifelse-dev,
+ libghc-network-dev,
+ libghc-network-uri-dev,
+ libghc-optparse-applicative-dev (>= 0.14.1),
+ libghc-quickcheck2-dev,
+ libghc-split-dev,
+ libghc-text-dev,
+ libghc-transformers-dev,
+ libghc-unix-compat-dev,
+ libghc-utf8-string-dev,
 Maintainer: Sean Whitton <spwhitton@spwhitton.name>
 Standards-Version: 4.4.1
 Vcs-Git: https://git.spwhitton.name/git-repair
@@ -30,7 +30,11 @@ Rules-Requires-Root: no
 Package: git-repair
 Architecture: any
 Section: utils
-Depends: ${misc:Depends}, ${shlibs:Depends}, git, rsync
+Depends:
+ git,
+ rsync,
+ ${misc:Depends},
+ ${shlibs:Depends},
 Description: repair various forms of damage to git repositories
  git-repair can repair various forms of damage to git repositories.
  .

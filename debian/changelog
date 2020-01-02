@@ -4,6 +4,7 @@ git-repair (1.20200102-1) UNRELEASED; urgency=medium
     - Tighten build-dep on optparse-applicative
     - Add build-deps on split, filepath-bytestring, attoparsec
     - Drop build-dep on missingh.
+  * wrap-and-sort -abst
 
  -- Sean Whitton <spwhitton@spwhitton.name>  Thu, 02 Jan 2020 18:07:39 +0000
 
