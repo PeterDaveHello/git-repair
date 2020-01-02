@@ -1,4 +1,1 @@
-fix-build-with-quickcheck-2.8.2.patch
-split-out-module-to-work-around-badly-na.patch
 patch-common.hs-to-avoid-duplicate-impor.patch
-patch-duplicate-arbitrary-instance-out-o.patch

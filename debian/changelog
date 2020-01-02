@@ -4,6 +4,10 @@ git-repair (1.20200102-1) UNRELEASED; urgency=medium
     - Tighten build-dep on optparse-applicative
     - Add build-deps on split, filepath-bytestring, attoparsec
     - Drop build-dep on missingh.
+  * Drop patches merged upstream:
+    - fix-build-with-quickcheck-2.8.2.patch
+    - patch-duplicate-arbitrary-instance-out-o.patch
+    - split-out-module-to-work-around-badly-na.patch.
   * Stop adding upstream entries to debian/changelog.
   * wrap-and-sort -abst
 
