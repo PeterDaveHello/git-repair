@@ -6,7 +6,7 @@
  -}
 
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-{-# LANGUAGE TypeSynonymInstances, CPP #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module Utility.QuickCheck
 	( module X
@@ -15,29 +15,24 @@ module Utility.QuickCheck
 
 import Test.QuickCheck as X
 import Data.Time.Clock.POSIX
+import Data.Ratio
 import System.Posix.Types
-#if ! MIN_VERSION_QuickCheck(2,8,2)
-import qualified Data.Map as M
-import qualified Data.Set as S
-#endif
-import Control.Applicative
+import Data.List.NonEmpty (NonEmpty(..))
 import Prelude
 
-#if ! MIN_VERSION_QuickCheck(2,8,2)
-instance (Arbitrary k, Arbitrary v, Ord k) => Arbitrary (M.Map k v) where
-	arbitrary = M.fromList <$> arbitrary
-
-instance (Arbitrary v, Ord v) => Arbitrary (S.Set v) where
-	arbitrary = S.fromList <$> arbitrary
-#endif
-
-{- Times before the epoch are excluded. -}
+{- Times before the epoch are excluded. Half with decimal and half without. -}
 instance Arbitrary POSIXTime where
-	arbitrary = fromInteger <$> nonNegative arbitrarySizedIntegral
+	arbitrary = do
+		n <- nonNegative arbitrarySizedBoundedIntegral :: Gen Int
+		d <- nonNegative arbitrarySizedIntegral
+		withd <- arbitrary
+		return $ if withd
+			then fromIntegral n + fromRational (1 % max d 1)
+			else fromIntegral n
 
 {- Pids are never negative, or 0. -}
 instance Arbitrary ProcessID where
-	arbitrary = arbitrarySizedBoundedIntegral `suchThat` (> 0)
+	arbitrary = positive arbitrarySizedBoundedIntegral
 
 {- Inodes are never negative. -}
 instance Arbitrary FileID where
@@ -46,6 +41,9 @@ instance Arbitrary FileID where
 {- File sizes are never negative. -}
 instance Arbitrary FileOffset where
 	arbitrary = nonNegative arbitrarySizedIntegral
+
+instance Arbitrary l => Arbitrary (NonEmpty l) where
+	arbitrary = (:|) <$> arbitrary <*> arbitrary
 
 nonNegative :: (Num a, Ord a) => Gen a -> Gen a
 nonNegative g = g `suchThat` (>= 0)

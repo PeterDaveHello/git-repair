@@ -1,16 +1,48 @@
 {- Metered IO and actions
  -
- - Copyright 2012-2016 Joey Hess <id@joeyh.name>
+ - Copyright 2012-2018 Joey Hess <id@joeyh.name>
  -
  - License: BSD-2-clause
  -}
 
 {-# LANGUAGE TypeSynonymInstances, BangPatterns #-}
 
-module Utility.Metered where
+module Utility.Metered (
+	MeterUpdate,
+	nullMeterUpdate,
+	combineMeterUpdate,
+	BytesProcessed(..),
+	toBytesProcessed,
+	fromBytesProcessed,
+	addBytesProcessed,
+	zeroBytesProcessed,
+	withMeteredFile,
+	meteredWrite,
+	meteredWrite',
+	meteredWriteFile,
+	offsetMeterUpdate,
+	hGetContentsMetered,
+	hGetMetered,
+	defaultChunkSize,
+	watchFileSize,
+	OutputHandler(..),
+	ProgressParser,
+	commandMeter,
+	commandMeter',
+	demeterCommand,
+	demeterCommandEnv,
+	avoidProgress,
+	rateLimitMeterUpdate,
+	Meter,
+	mkMeter,
+	setMeterTotalSize,
+	updateMeter,
+	displayMeterHandle,
+	clearMeterHandle,
+	bandwidthMeter,
+) where
 
 import Common
-import Utility.FileSystemEncoding
 import Utility.Percentage
 import Utility.DataUnits
 import Utility.HumanTime
@@ -80,11 +112,6 @@ zeroBytesProcessed = BytesProcessed 0
 withMeteredFile :: FilePath -> MeterUpdate -> (L.ByteString -> IO a) -> IO a
 withMeteredFile f meterupdate a = withBinaryFile f ReadMode $ \h ->
 	hGetContentsMetered h meterupdate >>= a
-
-{- Sends the content of a file to a Handle, updating the meter as it's
- - written. -}
-streamMeteredFile :: FilePath -> MeterUpdate -> Handle -> IO ()
-streamMeteredFile f meterupdate h = withMeteredFile f meterupdate $ L.hPut h
 
 {- Writes a ByteString to a Handle, updating a meter as it's written. -}
 meteredWrite :: MeterUpdate -> Handle -> L.ByteString -> IO ()
@@ -211,7 +238,14 @@ type ProgressParser = String -> (Maybe BytesProcessed, String)
  - to update a meter.
  -}
 commandMeter :: ProgressParser -> OutputHandler -> MeterUpdate -> FilePath -> [CommandParam] -> IO Bool
-commandMeter progressparser oh meterupdate cmd params = 
+commandMeter progressparser oh meterupdate cmd params = do
+	ret <- commandMeter' progressparser oh meterupdate cmd params
+	return $ case ret of
+		Just ExitSuccess -> True
+		_ -> False
+
+commandMeter' :: ProgressParser -> OutputHandler -> MeterUpdate -> FilePath -> [CommandParam] -> IO (Maybe ExitCode)
+commandMeter' progressparser oh meterupdate cmd params = 
 	outputFilter cmd params Nothing
 		(feedprogress zeroBytesProcessed [])
 		handlestderr
@@ -224,7 +258,7 @@ commandMeter progressparser oh meterupdate cmd params =
 				unless (quietMode oh) $ do
 					S.hPut stdout b
 					hFlush stdout
-				let s = encodeW8 (S.unpack b)
+				let s = decodeBS b
 				let (mbytes, buf') = progressparser (buf++s)
 				case mbytes of
 					Nothing -> feedprogress prev buf' h
@@ -246,9 +280,13 @@ demeterCommand :: OutputHandler -> FilePath -> [CommandParam] -> IO Bool
 demeterCommand oh cmd params = demeterCommandEnv oh cmd params Nothing
 
 demeterCommandEnv :: OutputHandler -> FilePath -> [CommandParam] -> Maybe [(String, String)] -> IO Bool
-demeterCommandEnv oh cmd params environ = outputFilter cmd params environ
-	(\outh -> avoidProgress True outh stdouthandler)
-	(\errh -> avoidProgress True errh $ stderrHandler oh)
+demeterCommandEnv oh cmd params environ = do
+	ret <- outputFilter cmd params environ
+		(\outh -> avoidProgress True outh stdouthandler)
+		(\errh -> avoidProgress True errh $ stderrHandler oh)
+	return $ case ret of
+		Just ExitSuccess -> True
+		_ -> False
   where
 	stdouthandler l = 
 		unless (quietMode oh) $
@@ -271,16 +309,15 @@ outputFilter
 	-> Maybe [(String, String)]
 	-> (Handle -> IO ())
 	-> (Handle -> IO ())
-	-> IO Bool
-outputFilter cmd params environ outfilter errfilter = catchBoolIO $ do
+	-> IO (Maybe ExitCode)
+outputFilter cmd params environ outfilter errfilter = catchMaybeIO $ do
 	(_, Just outh, Just errh, pid) <- createProcess p
 		{ std_out = CreatePipe
 		, std_err = CreatePipe
 		}
 	void $ async $ tryIO (outfilter outh) >> hClose outh
 	void $ async $ tryIO (errfilter errh) >> hClose errh
-	ret <- checkSuccessProcess pid
-	return ret
+	waitForProcess pid
   where
 	p = (proc cmd (toCommand params))
 		{ env = environ }
@@ -288,14 +325,14 @@ outputFilter cmd params environ outfilter errfilter = catchBoolIO $ do
 -- | Limit a meter to only update once per unit of time.
 --
 -- It's nice to display the final update to 100%, even if it comes soon
--- after a previous update. To make that happen, a total size has to be
--- provided.
-rateLimitMeterUpdate :: NominalDiffTime -> Maybe Integer -> MeterUpdate -> IO MeterUpdate
-rateLimitMeterUpdate delta totalsize meterupdate = do
+-- after a previous update. To make that happen, the Meter has to know
+-- its total size.
+rateLimitMeterUpdate :: NominalDiffTime -> Meter -> MeterUpdate -> IO MeterUpdate
+rateLimitMeterUpdate delta (Meter totalsizev _ _ _) meterupdate = do
 	lastupdate <- newMVar (toEnum 0 :: POSIXTime)
 	return $ mu lastupdate
   where
-	mu lastupdate n@(BytesProcessed i) = case totalsize of
+	mu lastupdate n@(BytesProcessed i) = readMVar totalsizev >>= \case
 		Just t | i >= t -> meterupdate n
 		_ -> do
 			now <- getPOSIXTime
@@ -306,35 +343,38 @@ rateLimitMeterUpdate delta totalsize meterupdate = do
 					meterupdate n
 				else putMVar lastupdate prev
 
-data Meter = Meter (Maybe Integer) (MVar MeterState) (MVar String) RenderMeter DisplayMeter
+data Meter = Meter (MVar (Maybe Integer)) (MVar MeterState) (MVar String) DisplayMeter
 
 type MeterState = (BytesProcessed, POSIXTime)
 
-type DisplayMeter = MVar String -> String -> IO ()
+type DisplayMeter = MVar String -> Maybe Integer -> (BytesProcessed, POSIXTime) -> (BytesProcessed, POSIXTime) -> IO ()
 
 type RenderMeter = Maybe Integer -> (BytesProcessed, POSIXTime) -> (BytesProcessed, POSIXTime) -> String
 
 -- | Make a meter. Pass the total size, if it's known.
-mkMeter :: Maybe Integer -> RenderMeter -> DisplayMeter -> IO Meter
-mkMeter totalsize rendermeter displaymeter = Meter
-	<$> pure totalsize
+mkMeter :: Maybe Integer -> DisplayMeter -> IO Meter
+mkMeter totalsize displaymeter = Meter
+	<$> newMVar totalsize
 	<*> ((\t -> newMVar (zeroBytesProcessed, t)) =<< getPOSIXTime)
 	<*> newMVar ""
-	<*> pure rendermeter
 	<*> pure displaymeter
 
+setMeterTotalSize :: Meter -> Integer -> IO ()
+setMeterTotalSize (Meter totalsizev _ _ _) = void . swapMVar totalsizev . Just
+
 -- | Updates the meter, displaying it if necessary.
-updateMeter :: Meter -> BytesProcessed -> IO ()
-updateMeter (Meter totalsize sv bv rendermeter displaymeter) new = do
+updateMeter :: Meter -> MeterUpdate
+updateMeter (Meter totalsizev sv bv displaymeter) new = do
 	now <- getPOSIXTime
 	(old, before) <- swapMVar sv (new, now)
-	when (old /= new) $
-		displaymeter bv $ 
-			rendermeter totalsize (old, before) (new, now)
+	when (old /= new) $ do
+		totalsize <- readMVar totalsizev
+		displaymeter bv totalsize (old, before) (new, now)
 
 -- | Display meter to a Handle.
-displayMeterHandle :: Handle -> DisplayMeter
-displayMeterHandle h v s = do
+displayMeterHandle :: Handle -> RenderMeter -> DisplayMeter
+displayMeterHandle h rendermeter v msize old new = do
+	let s = rendermeter msize old new
 	olds <- swapMVar v s
 	-- Avoid writing when the rendered meter has not changed.
 	when (olds /= s) $ do
@@ -344,29 +384,32 @@ displayMeterHandle h v s = do
 
 -- | Clear meter displayed by displayMeterHandle.
 clearMeterHandle :: Meter -> Handle -> IO ()
-clearMeterHandle (Meter _ _ v _ _) h = do
+clearMeterHandle (Meter _ _ v _) h = do
 	olds <- readMVar v
 	hPutStr h $ '\r' : replicate (length olds) ' ' ++ "\r"
 	hFlush h
 
 -- | Display meter in the form:
---   10%         300 KiB/s 16m40s
+--   10%  1.3MiB  300 KiB/s 16m40s
 -- or when total size is not known:
---   1.3 MiB     300 KiB/s
+--   1.3 MiB      300 KiB/s
 bandwidthMeter :: RenderMeter
 bandwidthMeter mtotalsize (BytesProcessed old, before) (BytesProcessed new, now) =
 	unwords $ catMaybes
-		[ Just percentoramount
-		-- Pad enough for max width: "xxxx.xx KiB  xxxx KiB/s"
-		, Just $ replicate (23 - length percentoramount - length rate) ' '
+		[ Just percentamount
+		-- Pad enough for max width: "100%  xxxx.xx KiB  xxxx KiB/s"
+		, Just $ replicate (29 - length percentamount - length rate) ' '
 		, Just rate
 		, estimatedcompletion
 		]
   where
-	percentoramount = case mtotalsize of
-		Just totalsize -> showPercentage 0 $
-			percentage totalsize (min new totalsize)
-		Nothing -> roughSize' memoryUnits True 2 new
+	amount = roughSize' memoryUnits True 2 new
+	percentamount = case mtotalsize of
+		Just totalsize ->
+			let p = showPercentage 0 $
+				percentage totalsize (min new totalsize)
+			in p ++ replicate (6 - length p) ' ' ++ amount
+		Nothing -> amount
 	rate = roughSize' memoryUnits True 0 bytespersecond ++ "/s"
 	bytespersecond
 		| duration == 0 = fromIntegral transferred
@@ -377,5 +420,5 @@ bandwidthMeter mtotalsize (BytesProcessed old, before) (BytesProcessed new, now)
 		Just totalsize
 			| bytespersecond > 0 -> 
 				Just $ fromDuration $ Duration $
-					totalsize `div` bytespersecond
+					(totalsize - new) `div` bytespersecond
 		_ -> Nothing

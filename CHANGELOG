@@ -1,8 +1,12 @@
-git-repair (1.20170627) UNRELEASED; urgency=medium
+git-repair (1.20200102) unstable; urgency=medium
 
+  * Relicensed AGPL.
   * Merge from git-annex.
+  * Removed the network-uri build flag.
+  * Increased required version of several dependencies.
+  * Added dependencies on deepseq, attoparsec and filepath-bytestring.
 
- -- Joey Hess <id@joeyh.name>  Thu, 14 Dec 2017 12:55:44 -0400
+ -- Joey Hess <id@joeyh.name>  Thu, 02 Jan 2020 12:39:13 -0400
 
 git-repair (1.20170626) unstable; urgency=medium
 

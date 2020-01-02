@@ -17,7 +17,7 @@ import Control.Monad
 import System.PosixCompat.Types
 import System.PosixCompat.Files
 #ifndef mingw32_HOST_OS
-import System.Posix.Files
+import System.Posix.Files (symbolicLinkMode)
 import Control.Monad.IO.Class (liftIO)
 #endif
 import Control.Monad.IO.Class (MonadIO)
@@ -69,6 +69,7 @@ otherGroupModes :: [FileMode]
 otherGroupModes = 
 	[ groupReadMode, otherReadMode
 	, groupWriteMode, otherWriteMode
+	, groupExecuteMode, otherExecuteMode
 	]
 
 {- Removes the write bits from a file. -}

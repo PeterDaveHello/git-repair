@@ -24,11 +24,10 @@ module Utility.Process (
 	createProcessSuccess,
 	createProcessChecked,
 	createBackgroundProcess,
-	processTranscript,
-	processTranscript',
 	withHandle,
 	withIOHandles,
 	withOEHandles,
+	withNullHandle,
 	withQuietOutput,
 	feedWithQuietOutput,
 	createProcess,
@@ -54,13 +53,6 @@ import System.Log.Logger
 import Control.Concurrent
 import qualified Control.Exception as E
 import Control.Monad
-#ifndef mingw32_HOST_OS
-import qualified System.Posix.IO
-#else
-import Control.Applicative
-#endif
-import Data.Maybe
-import Prelude
 
 type CreateProcessRunner = forall a. CreateProcess -> ((Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> IO a) -> IO a
 
@@ -170,68 +162,6 @@ createProcessChecked checker p a = do
 createBackgroundProcess :: CreateProcessRunner
 createBackgroundProcess p a = a =<< createProcess p
 
--- | Runs a process, optionally feeding it some input, and
--- returns a transcript combining its stdout and stderr, and
--- whether it succeeded or failed.
-processTranscript :: String -> [String] -> (Maybe String) -> IO (String, Bool)
-processTranscript cmd opts = processTranscript' (proc cmd opts)
-
-processTranscript' :: CreateProcess -> Maybe String -> IO (String, Bool)
-processTranscript' cp input = do
-#ifndef mingw32_HOST_OS
-{- This implementation interleves stdout and stderr in exactly the order
- - the process writes them. -}
-	(readf, writef) <- System.Posix.IO.createPipe
-	readh <- System.Posix.IO.fdToHandle readf
-	writeh <- System.Posix.IO.fdToHandle writef
-	p@(_, _, _, pid) <- createProcess $ cp
-		{ std_in = if isJust input then CreatePipe else Inherit
-		, std_out = UseHandle writeh
-		, std_err = UseHandle writeh
-		}
-	hClose writeh
-
-	get <- mkreader readh
-	writeinput input p
-	transcript <- get
-
-	ok <- checkSuccessProcess pid
-	return (transcript, ok)
-#else
-{- This implementation for Windows puts stderr after stdout. -}
-	p@(_, _, _, pid) <- createProcess $ cp
-		{ std_in = if isJust input then CreatePipe else Inherit
-		, std_out = CreatePipe
-		, std_err = CreatePipe
-		}
-
-	getout <- mkreader (stdoutHandle p)
-	geterr <- mkreader (stderrHandle p)
-	writeinput input p
-	transcript <- (++) <$> getout <*> geterr
-
-	ok <- checkSuccessProcess pid
-	return (transcript, ok)
-#endif
-  where
-	mkreader h = do
-		s <- hGetContents h
-		v <- newEmptyMVar
-		void $ forkIO $ do
-			void $ E.evaluate (length s)
-			putMVar v ()
-		return $ do
-			takeMVar v
-			return s
-
-	writeinput (Just s) p = do
-		let inh = stdinHandle p
-		unless (null s) $ do
-			hPutStr inh s
-			hFlush inh
-		hClose inh
-	writeinput Nothing _ = return ()
-
 -- | Runs a CreateProcessRunner, on a CreateProcess structure, that
 -- is adjusted to pipe only from/to a single StdHandle, and passes
 -- the resulting Handle to an action.
@@ -248,13 +178,10 @@ withHandle h creator p a = creator p' $ a . select
 		, std_out = Inherit
 		, std_err = Inherit
 		}
-	(select, p')
-		| h == StdinHandle  =
-			(stdinHandle, base { std_in = CreatePipe })
-		| h == StdoutHandle =
-			(stdoutHandle, base { std_out = CreatePipe })
-		| h == StderrHandle =
-			(stderrHandle, base { std_err = CreatePipe })
+	(select, p') = case h of
+		StdinHandle -> (stdinHandle, base { std_in = CreatePipe })
+		StdoutHandle -> (stdoutHandle, base { std_out = CreatePipe })
+		StderrHandle -> (stderrHandle, base { std_err = CreatePipe })
 
 -- | Like withHandle, but passes (stdin, stdout) handles to the action.
 withIOHandles
@@ -284,13 +211,16 @@ withOEHandles creator p a = creator p' $ a . oeHandles
 		, std_err = CreatePipe
 		}
 
+withNullHandle :: (Handle -> IO a) -> IO a
+withNullHandle = withFile devNull WriteMode
+
 -- | Forces the CreateProcessRunner to run quietly;
 -- both stdout and stderr are discarded.
 withQuietOutput
 	:: CreateProcessRunner
 	-> CreateProcess
 	-> IO ()
-withQuietOutput creator p = withFile devNull WriteMode $ \nullh -> do
+withQuietOutput creator p = withNullHandle $ \nullh -> do
 	let p' = p
 		{ std_out = UseHandle nullh
 		, std_err = UseHandle nullh
@@ -316,7 +246,8 @@ devNull :: FilePath
 #ifndef mingw32_HOST_OS
 devNull = "/dev/null"
 #else
-devNull = "NUL"
+-- Use device namespace to prevent GHC from rewriting path
+devNull = "\\\\.\\NUL"
 #endif
 
 -- | Extract a desired handle from createProcess's tuple.

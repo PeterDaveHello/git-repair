@@ -7,7 +7,12 @@
 
 {-# OPTIONS_GHC -fno-warn-tabs #-}
 
-module Utility.Split where
+module Utility.Split (
+	split,
+	splitc,
+	replace,
+	dropFromEnd,
+) where
 
 import Data.List (intercalate)
 import Data.List.Split (splitOn)
@@ -28,3 +33,7 @@ splitc c s = case break (== c) s of
 -- | same as Data.List.Utils.replace
 replace :: Eq a => [a] -> [a] -> [a] -> [a] 
 replace old new = intercalate new . split old
+
+-- | Only traverses the list once while dropping the last n items.
+dropFromEnd :: Int -> [a] -> [a]
+dropFromEnd n l = zipWith const l (drop n l)

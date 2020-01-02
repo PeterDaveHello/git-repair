@@ -2,7 +2,7 @@
  -
  - Copyright 2013 Joey Hess <joey@kitenet.net>
  -
- - Licensed under the GNU GPL version 3 or higher.
+ - Licensed under the GNU AGPL version 3 or higher.
  -}
 
 import Options.Applicative
@@ -14,8 +14,7 @@ import qualified Git.Config
 import qualified Git.Construct
 import qualified Git.Destroyer
 import qualified Git.Fsck
-import Utility.Tmp
-import Utility.FileSystemEncoding
+import Utility.Tmp.Dir
 
 data Settings = Settings
 	{ forced :: Bool

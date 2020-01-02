@@ -5,10 +5,22 @@
  - License: BSD-2-clause
  -}
 
-{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -fno-warn-tabs #-}
 
-module Utility.Misc where
+module Utility.Misc (
+	hGetContentsStrict,
+	readFileStrict,
+	separate,
+	firstLine,
+	firstLine',
+	segment,
+	segmentDelim,
+	massReplace,
+	hGetSomeString,
+	exitBool,
+
+	prop_segment_regressionTest,
+) where
 
 import System.IO
 import Control.Monad
@@ -16,11 +28,8 @@ import Foreign
 import Data.Char
 import Data.List
 import System.Exit
-#ifndef mingw32_HOST_OS
-import System.Posix.Process (getAnyProcessStatus)
-import Utility.Exception
-#endif
 import Control.Applicative
+import qualified Data.ByteString as S
 import Prelude
 
 {- A version of hgetContents that is not lazy. Ensures file is 
@@ -48,6 +57,11 @@ separate c l = unbreak $ break c l
 {- Breaks out the first line. -}
 firstLine :: String -> String
 firstLine = takeWhile (/= '\n')
+
+firstLine' :: S.ByteString -> S.ByteString
+firstLine' = S.takeWhile (/= nl)
+  where
+	nl = fromIntegral (ord '\n')
 
 {- Splits a list into segments that are delimited by items matching
  - a predicate. (The delimiters are not included in the segments.)
@@ -111,22 +125,6 @@ hGetSomeString h sz = do
   where
 	peekbytes :: Int -> Ptr Word8 -> IO [Word8]
 	peekbytes len buf = mapM (peekElemOff buf) [0..pred len]
-
-{- Reaps any zombie processes that may be hanging around.
- -
- - Warning: Not thread safe. Anything that was expecting to wait
- - on a process and get back an exit status is going to be confused
- - if this reap gets there first. -}
-reapZombies :: IO ()
-#ifndef mingw32_HOST_OS
-reapZombies =
-	-- throws an exception when there are no child processes
-	catchDefaultIO Nothing (getAnyProcessStatus False True)
-		>>= maybe (return ()) (const reapZombies)
-
-#else
-reapZombies = return ()
-#endif
 
 exitBool :: Bool -> IO a
 exitBool False = exitFailure

@@ -7,11 +7,25 @@
 
 {-# LANGUAGE CPP #-}
 
-module Utility.Rsync where
+module Utility.Rsync (
+	rsyncShell,
+	rsyncServerSend,
+	rsyncServerReceive,
+	rsyncUseDestinationPermissions,
+	rsync,
+	rsyncUrlIsShell,
+	rsyncUrlIsPath,
+	rsyncProgress,
+	filterRsyncSafeOptions,
+) where
 
 import Common
 import Utility.Metered
 import Utility.Tuple
+
+#ifdef mingw32_HOST_OS
+import qualified System.FilePath.Posix as Posix
+#endif
 
 import Data.Char
 import System.Console.GetOpt
@@ -99,7 +113,16 @@ rsyncUrlIsPath s
  - The params must enable rsync's --progress mode for this to work.
  -}
 rsyncProgress :: OutputHandler -> MeterUpdate -> [CommandParam] -> IO Bool
-rsyncProgress oh meter = commandMeter parseRsyncProgress oh meter "rsync" . rsyncParamsFixup
+rsyncProgress oh meter ps =
+	commandMeter' parseRsyncProgress oh meter "rsync" (rsyncParamsFixup ps) >>= \case
+		Just ExitSuccess -> return True
+		Just (ExitFailure exitcode) -> do
+			when (exitcode /= 1) $
+				hPutStrLn stderr $ "rsync exited " ++ show exitcode
+			return False
+		Nothing -> do
+			hPutStrLn stderr $ "unable to run rsync"
+			return False
 
 {- Strategy: Look for chunks prefixed with \r (rsync writes a \r before
  - the first progress output, and each thereafter). The first number
@@ -139,3 +162,27 @@ filterRsyncSafeOptions = fst3 . getOpt Permute
 	[ Option [] ["bwlimit"] (reqArgLong "bwlimit") "" ]
   where
 	reqArgLong x = ReqArg (\v -> "--" ++ x ++ "=" ++ v) ""
+
+{- Converts a DOS style path to a msys2 style path. Only on Windows.
+ - Any trailing '\' is preserved as a trailing '/' 
+ - 
+ - Taken from: http://sourceforge.net/p/msys2/wiki/MSYS2%20introduction/i
+ -
+ - The virtual filesystem contains:
+ -  /c, /d, ...	mount points for Windows drives
+ -}
+#ifdef mingw32_HOST_OS
+toMSYS2Path :: FilePath -> FilePath
+toMSYS2Path p
+	| null drive = recombine parts
+	| otherwise = recombine $ "/" : driveletter drive : parts
+  where
+	(drive, p') = splitDrive p
+	parts = splitDirectories p'
+	driveletter = map toLower . takeWhile (/= ':')
+	recombine = fixtrailing . Posix.joinPath
+	fixtrailing s
+		| hasTrailingPathSeparator p = Posix.addTrailingPathSeparator s
+		| otherwise = s
+#endif
+

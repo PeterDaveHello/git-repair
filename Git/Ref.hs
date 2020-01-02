@@ -1,9 +1,11 @@
 {- git ref stuff
  -
- - Copyright 2011-2013 Joey Hess <id@joeyh.name>
+ - Copyright 2011-2019 Joey Hess <id@joeyh.name>
  -
- - Licensed under the GNU GPL version 3 or higher.
+ - Licensed under the GNU AGPL version 3 or higher.
  -}
+
+{-# LANGUAGE OverloadedStrings #-}
 
 module Git.Ref where
 
@@ -13,13 +15,14 @@ import Git.Command
 import Git.Sha
 import Git.Types
 
-import Data.Char (chr)
+import Data.Char (chr, ord)
+import qualified Data.ByteString as S
 
 headRef :: Ref
 headRef = Ref "HEAD"
 
 headFile :: Repo -> FilePath
-headFile r = localGitDir r </> "HEAD"
+headFile r = fromRawFilePath (localGitDir r) </> "HEAD"
 
 setHeadRef :: Ref -> Repo -> IO ()
 setHeadRef ref r = writeFile (headFile r) ("ref: " ++ fromRef ref)
@@ -33,11 +36,18 @@ describe = fromRef . base
  - Converts such a fully qualified ref into a base ref
  - (eg: master or origin/master). -}
 base :: Ref -> Ref
-base = Ref . remove "refs/heads/" . remove "refs/remotes/" . fromRef
+base = removeBase "refs/heads/" . removeBase "refs/remotes/"
+
+{- Removes a directory such as "refs/heads/master" from a
+ - fully qualified ref. Any ref not starting with it is left as-is. -}
+removeBase :: String -> Ref -> Ref
+removeBase dir (Ref r)
+	| prefix `isPrefixOf` r = Ref (drop (length prefix) r)
+	| otherwise = Ref r
   where
-	remove prefix s
-		| prefix `isPrefixOf` s = drop (length prefix) s
-		| otherwise = s
+	prefix = case end dir of
+		['/'] -> dir
+		_ -> dir ++ "/"
 
 {- Given a directory such as "refs/remotes/origin", and a ref such as
  - refs/heads/master, yields a version of that ref under the directory,
@@ -55,8 +65,8 @@ branchRef = underBase "refs/heads"
  - Prefixing the file with ./ makes this work even if in a subdirectory
  - of a repo.
  -}
-fileRef :: FilePath -> Ref
-fileRef f = Ref $ ":./" ++ f
+fileRef :: RawFilePath -> Ref
+fileRef f = Ref $ ":./" ++ fromRawFilePath f
 
 {- Converts a Ref to refer to the content of the Ref on a given date. -}
 dateRef :: Ref -> RefDate -> Ref
@@ -64,7 +74,7 @@ dateRef (Ref r) (RefDate d) = Ref $ r ++ "@" ++ d
 
 {- A Ref that can be used to refer to a file in the repository as it
  - appears in a given Ref. -}
-fileFromRef :: Ref -> FilePath -> Ref
+fileFromRef :: Ref -> RawFilePath -> Ref
 fileFromRef (Ref r) f = let (Ref fr) = fileRef f in Ref (r ++ fr)
 
 {- Checks if a ref exists. -}
@@ -75,24 +85,29 @@ exists ref = runBool
 {- The file used to record a ref. (Git also stores some refs in a
  - packed-refs file.) -}
 file :: Ref -> Repo -> FilePath
-file ref repo = localGitDir repo </> fromRef ref
+file ref repo = fromRawFilePath (localGitDir repo) </> fromRef ref
 
 {- Checks if HEAD exists. It generally will, except for in a repository
  - that was just created. -}
 headExists :: Repo -> IO Bool
 headExists repo = do
-	ls <- lines <$> pipeReadStrict [Param "show-ref", Param "--head"] repo
-	return $ any (" HEAD" `isSuffixOf`) ls
+	ls <- S.split nl <$> pipeReadStrict [Param "show-ref", Param "--head"] repo
+	return $ any (" HEAD" `S.isSuffixOf`) ls
+  where
+	nl = fromIntegral (ord '\n')
 
 {- Get the sha of a fully qualified git ref, if it exists. -}
 sha :: Branch -> Repo -> IO (Maybe Sha)
 sha branch repo = process <$> showref repo
   where
-	showref = pipeReadStrict [Param "show-ref",
-		Param "--hash", -- get the hash
-		Param $ fromRef branch]
-	process [] = Nothing
-	process s = Just $ Ref $ firstLine s
+	showref = pipeReadStrict
+		[ Param "show-ref"
+		, Param "--hash" -- get the hash
+		, Param $ fromRef branch
+		]
+	process s
+		| S.null s = Nothing
+		| otherwise = Just $ Ref $ decodeBS' $ firstLine' s
 
 headSha :: Repo -> IO (Maybe Sha)
 headSha = sha headRef
@@ -107,7 +122,7 @@ matchingWithHEAD refs repo = matching' ("--head" : map fromRef refs) repo
 
 {- List of (shas, branches) matching a given ref spec. -}
 matching' :: [String] -> Repo -> IO [(Sha, Branch)]
-matching' ps repo = map gen . lines <$> 
+matching' ps repo = map gen . lines . decodeBS' <$> 
 	pipeReadStrict (Param "show-ref" : map Param ps) repo
   where
 	gen l = let (r, b) = separate (== ' ') l
@@ -134,10 +149,13 @@ delete oldvalue ref = run
 	, Param $ fromRef oldvalue
 	]
 
-{- Gets the sha of the tree a ref uses. -}
+{- Gets the sha of the tree a ref uses. 
+ -
+ - The ref may be something like a branch name, and it could contain
+ - ":subdir" if a subtree is wanted. -}
 tree :: Ref -> Repo -> IO (Maybe Sha)
-tree (Ref ref) = extractSha <$$> pipeReadStrict
-	[ Param "rev-parse", Param ref' ]
+tree (Ref ref) = extractSha . decodeBS <$$> pipeReadStrict
+	[ Param "rev-parse", Param "--verify", Param "--quiet", Param ref' ]
   where
 	ref' = if ":" `isInfixOf` ref
 		then ref

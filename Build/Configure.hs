@@ -5,8 +5,9 @@
 module Build.Configure where
 
 import System.Environment
-import Control.Applicative
 import Control.Monad.IfElse
+import Control.Applicative
+import Prelude
 
 import Build.TestConfig
 import Build.Version
@@ -25,7 +26,6 @@ getGitVersion = Config "gitversion" . StringConfig . show
 
 run :: [TestCase] -> IO ()
 run ts = do
-	args <- getArgs
 	config <- runTests ts
 	writeSysConfig config
 	whenM (isReleaseBuild) $
