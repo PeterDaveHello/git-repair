@@ -8,6 +8,8 @@ git-repair (1.20200102-1) UNRELEASED; urgency=medium
     - fix-build-with-quickcheck-2.8.2.patch
     - patch-duplicate-arbitrary-instance-out-o.patch
     - split-out-module-to-work-around-badly-na.patch.
+  * Refresh remaining patch, patch-common.hs-to-avoid-duplicate-impor.patch.
+    Partially applied upstream.
   * Stop adding upstream entries to debian/changelog.
   * wrap-and-sort -abst
 

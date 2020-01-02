@@ -6,17 +6,9 @@ Subject: patch Common.hs to avoid duplicate import errors
 
 ---
 
---- git-repair-1.20151215.orig/Common.hs
-+++ git-repair-1.20151215/Common.hs
-@@ -13,7 +13,6 @@ import Data.String.Utils as X hiding (jo
- import Data.Monoid as X
- 
- import System.FilePath as X
--import System.Directory as X
- import System.IO as X hiding (FilePath)
- #ifndef mingw32_HOST_OS
- import System.Posix.IO as X hiding (createPipe)
-@@ -25,7 +24,7 @@ import Utility.Exception as X
+--- a/Common.hs
++++ b/Common.hs
+@@ -26,7 +25,7 @@ import Utility.Exception as X
  import Utility.SafeCommand as X
  import Utility.Process as X
  import Utility.Path as X
