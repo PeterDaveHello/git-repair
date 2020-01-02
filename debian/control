@@ -5,7 +5,6 @@ Build-Depends:
 	debhelper (>= 9),
 	ghc,
 	git,
-	libghc-missingh-dev,
 	libghc-hslogger-dev,
 	libghc-network-dev,
 	libghc-exceptions-dev (>= 0.6),
@@ -16,8 +15,11 @@ Build-Depends:
 	libghc-quickcheck2-dev,
 	libghc-utf8-string-dev,
 	libghc-async-dev,
-	libghc-optparse-applicative-dev (>= 0.10.0),
-	libghc-network-uri-dev
+	libghc-split-dev,
+	libghc-optparse-applicative-dev (>= 0.14.1),
+	libghc-network-uri-dev,
+        libghc-filepath-bytestring-dev (>= 1.4.2.1.0),
+        libghc-attoparsec-dev,
 Maintainer: Sean Whitton <spwhitton@spwhitton.name>
 Standards-Version: 4.4.1
 Vcs-Git: https://git.spwhitton.name/git-repair

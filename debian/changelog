@@ -1,3 +1,12 @@
+git-repair (1.20200102-1) UNRELEASED; urgency=medium
+
+  * New upstream release.
+    - Tighten build-dep on optparse-applicative
+    - Add build-deps on split, filepath-bytestring, attoparsec
+    - Drop build-dep on missingh.
+
+ -- Sean Whitton <spwhitton@spwhitton.name>  Thu, 02 Jan 2020 18:07:39 +0000
+
 git-repair (1.20151215-2) unstable; urgency=medium
 
   * Adopt package.
