@@ -1,4 +1,4 @@
-git-repair (1.20200102-1) UNRELEASED; urgency=medium
+git-repair (1.20200102-1) unstable; urgency=medium
 
   * New upstream release.
     - Tighten build-dep on optparse-applicative
@@ -13,7 +13,7 @@ git-repair (1.20200102-1) UNRELEASED; urgency=medium
   * Stop adding upstream entries to debian/changelog.
   * wrap-and-sort -abst
 
- -- Sean Whitton <spwhitton@spwhitton.name>  Thu, 02 Jan 2020 18:07:39 +0000
+ -- Sean Whitton <spwhitton@spwhitton.name>  Thu, 02 Jan 2020 19:07:12 +0000
 
 git-repair (1.20151215-2) unstable; urgency=medium
 
