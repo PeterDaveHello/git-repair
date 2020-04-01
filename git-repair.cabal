@@ -10,7 +10,7 @@ License-File: COPYRIGHT
 Build-Type: Custom
 Homepage: http://git-repair.branchable.com/
 Category: Utility
-Synopsis: repairs a damanged git repisitory
+Synopsis: repairs a damaged git repository
 Description:
  git-repair can repair various forms of damage to git repositories.
  .

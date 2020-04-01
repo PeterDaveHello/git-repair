@@ -27,7 +27,7 @@ Then to install it:
 ## how it works
 
 `git-repair` starts by deleting all corrupt objects, and
-retreiving all missing objects that it can from the remotes of the
+retrieving all missing objects that it can from the remotes of the
 repository.
 
 If that is not sufficient to fully recover the repository, it can also

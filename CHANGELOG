@@ -1,3 +1,9 @@
+git-repair (1.20200103) UNRELEASED; urgency=medium
+
+  * Fix a few documentation typos.
+
+ -- Joey Hess <id@joeyh.name>  Wed, 01 Apr 2020 13:12:33 -0400
+
 git-repair (1.20200102) unstable; urgency=medium
 
   * Relicensed AGPL.
