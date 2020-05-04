@@ -39,7 +39,8 @@ source-repository head
 Executable git-repair
   Main-Is: git-repair.hs
   GHC-Options: -threaded -Wall -fno-warn-tabs
-  Extensions: LambdaCase
+  Default-Language: Haskell98
+  Default-Extensions: LambdaCase
   Build-Depends: split, hslogger, directory, filepath, containers, mtl,
    unix-compat (>= 0.5), bytestring, exceptions (>= 0.6), transformers,
    base (>= 4.11.1.0 && < 5.0), IfElse, text, process, time, QuickCheck,
