@@ -1,6 +1,6 @@
 Name: git-repair
 Version: 1.20200504
-Cabal-Version: >= 1.8
+Cabal-Version: >= 1.10
 License: AGPL-3
 Maintainer: Joey Hess <joey@kitenet.net>
 Author: Joey Hess
