@@ -1,0 +1,5 @@
+git-repair 1.20200504 released with [[!toggle text="these changes"]]
+[[!toggleable text="""
+   * Fix a few documentation typos.
+   * Improve fetching from a remote with an url in host:path format.
+   * Merge from git-annex."""]]
