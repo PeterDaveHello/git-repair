@@ -1,9 +1,11 @@
 {- git cat-file interface
  -
- - Copyright 2011-2019 Joey Hess <id@joeyh.name>
+ - Copyright 2011-2020 Joey Hess <id@joeyh.name>
  -
  - Licensed under the GNU AGPL version 3 or higher.
  -}
+
+{-# LANGUAGE OverloadedStrings #-}
 
 module Git.CatFile (
 	CatFileHandle,
@@ -22,7 +24,9 @@ module Git.CatFile (
 import System.IO
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
-import qualified Data.ByteString.Lazy.Char8 as L8
+import qualified Data.ByteString.Char8 as S8
+import qualified Data.Attoparsec.ByteString as A
+import qualified Data.Attoparsec.ByteString.Char8 as A8
 import qualified Data.Map as M
 import Data.String
 import Data.Char
@@ -69,11 +73,11 @@ catFileStop h = do
 {- Reads a file from a specified branch. -}
 catFile :: CatFileHandle -> Branch -> RawFilePath -> IO L.ByteString
 catFile h branch file = catObject h $ Ref $
-	fromRef branch ++ ":" ++ fromRawFilePath (toInternalGitPath file)
+	fromRef' branch <> ":" <> toInternalGitPath file
 
 catFileDetails :: CatFileHandle -> Branch -> RawFilePath -> IO (Maybe (L.ByteString, Sha, ObjectType))
 catFileDetails h branch file = catObjectDetails h $ Ref $
-	fromRef branch ++ ":" ++ fromRawFilePath (toInternalGitPath file)
+	fromRef' branch <> ":" <> toInternalGitPath file
 
 {- Uses a running git cat-file read the content of an object.
  - Objects that do not exist will have "" returned. -}
@@ -82,9 +86,9 @@ catObject h object = maybe L.empty fst3 <$> catObjectDetails h object
 
 catObjectDetails :: CatFileHandle -> Ref -> IO (Maybe (L.ByteString, Sha, ObjectType))
 catObjectDetails h object = query (catFileProcess h) object newlinefallback $ \from -> do
-	header <- hGetLine from
+	header <- S8.hGetLine from
 	case parseResp object header of
-		Just (ParsedResp sha size objtype) -> do
+		Just (ParsedResp sha objtype size) -> do
 			content <- S.hGet from (fromIntegral size)
 			eatchar '\n' from
 			return $ Just (L.fromChunks [content], sha, objtype)
@@ -112,9 +116,9 @@ catObjectDetails h object = query (catFileProcess h) object newlinefallback $ \f
 {- Gets the size and type of an object, without reading its content. -}
 catObjectMetaData :: CatFileHandle -> Ref -> IO (Maybe (Sha, FileSize, ObjectType))
 catObjectMetaData h object = query (checkFileProcess h) object newlinefallback $ \from -> do
-	resp <- hGetLine from
+	resp <- S8.hGetLine from
 	case parseResp object resp of
-		Just (ParsedResp sha size objtype) ->
+		Just (ParsedResp sha objtype size) ->
 			return $ Just (sha, size, objtype)
 		Just DNE -> return Nothing
 		Nothing -> error $ "unknown response from git cat-file " ++ show (resp, object)
@@ -126,36 +130,39 @@ catObjectMetaData h object = query (checkFileProcess h) object newlinefallback $
 		objtype <- queryObjectType object (gitRepo h)
 		return $ (,,) <$> sha <*> sz <*> objtype
 
-data ParsedResp = ParsedResp Sha FileSize ObjectType | DNE
+data ParsedResp = ParsedResp Sha ObjectType FileSize | DNE
+	deriving (Show)
 
 query :: CoProcess.CoProcessHandle -> Ref -> IO a -> (Handle -> IO a) -> IO a
 query hdl object newlinefallback receive
 	-- git cat-file --batch uses a line based protocol, so when the
 	-- filename itself contains a newline, have to fall back to another
 	-- method of getting the information.
-	| '\n' `elem` s = newlinefallback
+	| '\n' `S8.elem` s = newlinefallback
 	-- git strips carriage return from the end of a line, out of some
 	-- misplaced desire to support windows, so also use the newline
 	-- fallback for those.
-	| "\r" `isSuffixOf` s = newlinefallback
+	| "\r" `S8.isSuffixOf` s = newlinefallback
 	| otherwise = CoProcess.query hdl send receive
   where
-	send to = hPutStrLn to s
-	s = fromRef object
+	send to = S8.hPutStrLn to s
+	s = fromRef' object
 
-parseResp :: Ref -> String -> Maybe ParsedResp
-parseResp object l 
-	| " missing" `isSuffixOf` l -- less expensive than full check
-		&& l == fromRef object ++ " missing" = Just DNE
-	| otherwise = case words l of
-		[sha, objtype, size]
-			| length sha == shaSize ->
-				case (readObjectType (encodeBS objtype), reads size) of
-					(Just t, [(bytes, "")]) -> 
-						Just $ ParsedResp (Ref sha) bytes t
-					_ -> Nothing
-			| otherwise -> Nothing
-		_ -> Nothing
+parseResp :: Ref -> S.ByteString -> Maybe ParsedResp
+parseResp object s
+	| " missing" `S.isSuffixOf` s -- less expensive than full check
+		&& s == fromRef' object <> " missing" = Just DNE
+	| otherwise = eitherToMaybe $ A.parseOnly respParser s
+
+respParser :: A.Parser ParsedResp
+respParser = ParsedResp
+	<$> (maybe (fail "bad sha") return . extractSha =<< nextword)
+	<* A8.char ' '
+	<*> (maybe (fail "bad object type") return . readObjectType =<< nextword)
+	<* A8.char ' '
+	<*> A8.decimal
+  where
+	nextword = A8.takeTill (== ' ')
 
 querySingle :: CommandParam -> Ref -> Repo -> (Handle -> IO a) -> IO (Maybe a)
 querySingle o r repo reader = assertLocal repo $
@@ -219,39 +226,39 @@ catTree h treeref = go <$> catObjectDetails h treeref
 catCommit :: CatFileHandle -> Ref -> IO (Maybe Commit)
 catCommit h commitref = go <$> catObjectDetails h commitref
   where
-	go (Just (b, _, CommitObject)) = parseCommit b
+	go (Just (b, _, CommitObject)) = parseCommit (L.toStrict b)
 	go _ = Nothing
 
-parseCommit :: L.ByteString -> Maybe Commit
+parseCommit :: S.ByteString -> Maybe Commit
 parseCommit b = Commit
-	<$> (extractSha . L8.unpack =<< field "tree")
-	<*> Just (maybe [] (mapMaybe (extractSha . L8.unpack)) (fields "parent"))
+	<$> (extractSha =<< field "tree")
+	<*> Just (maybe [] (mapMaybe extractSha) (fields "parent"))
 	<*> (parsemetadata <$> field "author")
 	<*> (parsemetadata <$> field "committer")
-	<*> Just (L8.unpack $ L.intercalate (L.singleton nl) message)
+	<*> Just (decodeBS $ S.intercalate (S.singleton nl) message)
   where
 	field n = headMaybe =<< fields n
 	fields n = M.lookup (fromString n) fieldmap
 	fieldmap = M.fromListWith (++) ((map breakfield) header)
 	breakfield l =
-		let (k, sp_v) = L.break (== sp) l
-		in (k, [L.drop 1 sp_v])
-	(header, message) = separate L.null ls
-	ls = L.split nl b
+		let (k, sp_v) = S.break (== sp) l
+		in (k, [S.drop 1 sp_v])
+	(header, message) = separate S.null ls
+	ls = S.split nl b
 
 	-- author and committer lines have the form: "name <email> date"
 	-- The email is always present, even if empty "<>"
 	parsemetadata l = CommitMetaData
-		{ commitName = whenset $ L.init name_sp
+		{ commitName = whenset $ S.init name_sp
 		, commitEmail = whenset email
-		, commitDate = whenset $ L.drop 2 gt_sp_date
+		, commitDate = whenset $ S.drop 2 gt_sp_date
 		}
 	  where
-		(name_sp, rest) = L.break (== lt) l
-		(email, gt_sp_date) = L.break (== gt) (L.drop 1 rest)
+		(name_sp, rest) = S.break (== lt) l
+		(email, gt_sp_date) = S.break (== gt) (S.drop 1 rest)
 		whenset v
-			| L.null v = Nothing
-			| otherwise = Just (L8.unpack v)
+			| S.null v = Nothing
+			| otherwise = Just (decodeBS v)
 
 	nl = fromIntegral (ord '\n')
 	sp = fromIntegral (ord ' ')

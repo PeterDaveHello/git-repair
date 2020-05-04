@@ -4,7 +4,6 @@
 
 module Build.Configure where
 
-import System.Environment
 import Control.Monad.IfElse
 import Control.Applicative
 import Prelude

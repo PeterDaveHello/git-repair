@@ -1,6 +1,8 @@
 git-repair (1.20200103) UNRELEASED; urgency=medium
 
   * Fix a few documentation typos.
+  * Improve fetching from a remote with an url in host:path format.
+  * Merge from git-annex.
 
  -- Joey Hess <id@joeyh.name>  Wed, 01 Apr 2020 13:12:33 -0400
 

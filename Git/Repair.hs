@@ -122,24 +122,26 @@ retrieveMissingObjects missing referencerepo r
 			)
 	pullremotes tmpr (rmt:rmts) fetchrefs ms
 		| not (foundBroken ms) = return ms
-		| otherwise = do
-			putStrLn $ "Trying to recover missing objects from remote " ++ repoDescribe rmt ++ "."
-			ifM (fetchfrom (repoLocation rmt) fetchrefs tmpr)
-				( do
-					void $ explodePacks tmpr
-					void $ copyObjects tmpr r
-					case ms of
-						FsckFailed -> pullremotes tmpr rmts fetchrefs ms
-						FsckFoundMissing s t -> do
-							stillmissing <- findMissing (S.toList s) r
-							pullremotes tmpr rmts fetchrefs (FsckFoundMissing stillmissing t)
-				, pullremotes tmpr rmts fetchrefs ms
-				)
-	fetchfrom fetchurl ps fetchr = runBool ps' fetchr'
+		| otherwise = case remoteName rmt of
+			Just n -> do
+				putStrLn $ "Trying to recover missing objects from remote " ++ n ++ "."
+				ifM (fetchfrom n fetchrefs tmpr)
+					( do
+						void $ explodePacks tmpr
+						void $ copyObjects tmpr r
+						case ms of
+							FsckFailed -> pullremotes tmpr rmts fetchrefs ms
+							FsckFoundMissing s t -> do
+								stillmissing <- findMissing (S.toList s) r
+								pullremotes tmpr rmts fetchrefs (FsckFoundMissing stillmissing t)
+					, pullremotes tmpr rmts fetchrefs ms
+					)
+			Nothing -> pullremotes tmpr rmts fetchrefs ms
+	fetchfrom loc ps fetchr = runBool ps' fetchr'
 	  where
 		ps' = 
 			[ Param "fetch"
-			, Param fetchurl
+			, Param loc
 			, Param "--force"
 			, Param "--update-head-ok"
 			, Param "--quiet"
@@ -232,7 +234,7 @@ getAllRefs r = getAllRefs' (fromRawFilePath (localGitDir r) </> "refs")
 getAllRefs' :: FilePath -> IO [Ref]
 getAllRefs' refdir = do
 	let topsegs = length (splitPath refdir) - 1
-	let toref = Ref . joinPath . drop topsegs . splitPath
+	let toref = Ref . encodeBS' . joinPath . drop topsegs . splitPath
 	map toref <$> dirContentsRecursive refdir
 
 explodePackedRefsFile :: Repo -> IO ()
@@ -245,8 +247,9 @@ explodePackedRefsFile r = do
 		nukeFile f
   where
 	makeref (sha, ref) = do
-		let dest = fromRawFilePath (localGitDir r) </> fromRef ref
-		createDirectoryIfMissing True (parentDir dest)
+		let gitd = fromRawFilePath (localGitDir r)
+		let dest = gitd </> fromRef ref
+		createDirectoryUnder gitd (parentDir dest)
 		unlessM (doesFileExist dest) $
 			writeFile dest (fromRef sha)
 
@@ -256,8 +259,8 @@ packedRefsFile r = fromRawFilePath (localGitDir r) </> "packed-refs"
 parsePacked :: String -> Maybe (Sha, Ref)
 parsePacked l = case words l of
 	(sha:ref:[])
-		| isJust (extractSha sha) && Ref.legal True ref ->
-			Just (Ref sha, Ref ref)
+		| isJust (extractSha (encodeBS' sha)) && Ref.legal True ref ->
+			Just (Ref (encodeBS' sha), Ref (encodeBS' ref))
 	_ -> Nothing
 
 {- git-branch -d cannot be used to remove a branch that is directly
@@ -278,13 +281,13 @@ findUncorruptedCommit missing goodcommits branch r = do
 	if ok
 		then return (Just branch, goodcommits')
 		else do
-			(ls, cleanup) <- pipeNullSplit
+			(ls, cleanup) <- pipeNullSplit'
 				[ Param "log"
 				, Param "-z"
 				, Param "--format=%H"
 				, Param (fromRef branch)
 				] r
-			let branchshas = catMaybes $ map (extractSha . decodeBL) ls
+			let branchshas = catMaybes $ map extractSha ls
 			reflogshas <- RefLog.get branch r
 			-- XXX Could try a bit harder here, and look
 			-- for uncorrupted old commits in branches in the
@@ -327,8 +330,8 @@ verifyCommit missing goodcommits commit r
   where
 	parse l = case words l of
 		(commitsha:treesha:[]) -> (,)
-			<$> extractSha commitsha
-			<*> extractSha treesha
+			<$> extractSha (encodeBS' commitsha)
+			<*> extractSha (encodeBS' treesha)
 		_ -> Nothing
 	check [] = return True
 	check ((c, t):rest)
@@ -447,7 +450,8 @@ preRepair g = do
 		void $ tryIO $ allowWrite f
   where
 	headfile = fromRawFilePath (localGitDir g) </> "HEAD"
-	validhead s = "ref: refs/" `isPrefixOf` s || isJust (extractSha s)
+	validhead s = "ref: refs/" `isPrefixOf` s
+		|| isJust (extractSha (encodeBS' s))
 
 {- Put it all together. -}
 runRepair :: (Ref -> Bool) -> Bool -> Repo -> IO (Bool, [Branch])

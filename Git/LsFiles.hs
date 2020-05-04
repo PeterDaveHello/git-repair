@@ -1,6 +1,6 @@
 {- git ls-files interface
  -
- - Copyright 2010-2018 Joey Hess <id@joeyh.name>
+ - Copyright 2010-2019 Joey Hess <id@joeyh.name>
  -
  - Licensed under the GNU AGPL version 3 or higher.
  -}
@@ -24,6 +24,7 @@ module Git.LsFiles (
 	Unmerged(..),
 	unmerged,
 	StagedDetails,
+	inodeCaches,
 ) where
 
 import Common
@@ -31,17 +32,45 @@ import Git
 import Git.Command
 import Git.Types
 import Git.Sha
+import Utility.InodeCache
+import Utility.TimeStamp
 
 import Numeric
+import Data.Char
 import System.Posix.Types
-import qualified Data.ByteString.Lazy as L
+import qualified Data.Map as M
+import qualified Data.ByteString as S
 
-{- Scans for files that are checked into git's index at the specified locations. -}
+{- It's only safe to use git ls-files on the current repo, not on a remote.
+ -
+ - Git has some strange behavior when git ls-files is used with repos
+ - that are not the one that the cwd is in:
+ - git --git-dir=../foo/.git --worktree=../foo ../foo fails saying 
+ - "../foo is outside repository".
+ - That does not happen when an absolute path is provided.
+ -
+ - Also, the files output by ls-files are relative to the cwd. 
+ - Unless it's run on remote. Then it's relative to the top of the remote
+ - repo.
+ -
+ - So, best to avoid that class of problems.
+ -}
+safeForLsFiles :: Repo -> Bool
+safeForLsFiles r = isNothing (remoteName r)
+
+guardSafeForLsFiles :: Repo -> IO a -> IO a
+guardSafeForLsFiles r a
+	| safeForLsFiles r = a
+	| otherwise = error $ "git ls-files is unsafe to run on repository " ++ repoDescribe r
+
+{- Lists files that are checked into git's index at the specified paths.
+ - With no paths, all files are listed.
+ -}
 inRepo :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
 inRepo = inRepo' [] 
 
 inRepo' :: [CommandParam] -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-inRepo' ps l repo = pipeNullSplit' params repo
+inRepo' ps l repo = guardSafeForLsFiles repo $ pipeNullSplit' params repo
   where
 	params = 
 		Param "ls-files" :
@@ -53,14 +82,15 @@ inRepo' ps l repo = pipeNullSplit' params repo
 {- Files that are checked into the index or have been committed to a
  - branch. -}
 inRepoOrBranch :: Branch -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-inRepoOrBranch (Ref b) = inRepo' [Param $ "--with-tree=" ++ b]
+inRepoOrBranch b = inRepo' [Param $ "--with-tree=" ++ fromRef b]
 
 {- Scans for files at the specified locations that are not checked into git. -}
 notInRepo :: Bool -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
 notInRepo = notInRepo' []
 
 notInRepo' :: [CommandParam] -> Bool -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-notInRepo' ps include_ignored l repo = pipeNullSplit' params repo
+notInRepo' ps include_ignored l repo = guardSafeForLsFiles repo $
+	pipeNullSplit' params repo
   where
 	params = concat
 		[ [ Param "ls-files", Param "--others"]
@@ -81,18 +111,20 @@ notInRepoIncludingEmptyDirectories = notInRepo' [Param "--directory"]
 {- Finds all files in the specified locations, whether checked into git or
  - not. -}
 allFiles :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-allFiles l = pipeNullSplit' $
-	Param "ls-files" :
-	Param "--cached" :
-	Param "--others" :
-	Param "-z" :
-	Param "--" :
-	map (File . fromRawFilePath) l
+allFiles l repo = guardSafeForLsFiles repo $ pipeNullSplit' params repo
+  where
+	params =
+		Param "ls-files" :
+		Param "--cached" :
+		Param "--others" :
+		Param "-z" :
+		Param "--" :
+		map (File . fromRawFilePath) l
 
 {- Returns a list of files in the specified locations that have been
  - deleted. -}
 deleted :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-deleted l repo = pipeNullSplit' params repo
+deleted l repo = guardSafeForLsFiles repo $ pipeNullSplit' params repo
   where
 	params =
 		Param "ls-files" :
@@ -104,7 +136,7 @@ deleted l repo = pipeNullSplit' params repo
 {- Returns a list of files in the specified locations that have been
  - modified. -}
 modified :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-modified l repo = pipeNullSplit' params repo
+modified l repo = guardSafeForLsFiles repo $ pipeNullSplit' params repo
   where
 	params = 
 		Param "ls-files" :
@@ -116,7 +148,7 @@ modified l repo = pipeNullSplit' params repo
 {- Files that have been modified or are not checked into git (and are not
  - ignored). -}
 modifiedOthers :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-modifiedOthers l repo = pipeNullSplit' params repo
+modifiedOthers l repo = guardSafeForLsFiles repo $ pipeNullSplit' params repo
   where
 	params = 
 		Param "ls-files" :
@@ -137,7 +169,8 @@ stagedNotDeleted :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
 stagedNotDeleted = staged' [Param "--diff-filter=ACMRT"]
 
 staged' :: [CommandParam] -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-staged' ps l repo = pipeNullSplit' (prefix ++ ps ++ suffix) repo
+staged' ps l repo = guardSafeForLsFiles repo $
+	pipeNullSplit' (prefix ++ ps ++ suffix) repo
   where
 	prefix = [Param "diff", Param "--cached", Param "--name-only", Param "-z"]
 	suffix = Param "--" : map (File . fromRawFilePath) l
@@ -156,19 +189,22 @@ stagedDetails = stagedDetails' []
 {- Gets details about staged files, including the Sha of their staged
  - contents. -}
 stagedDetails' :: [CommandParam] -> [RawFilePath] -> Repo -> IO ([StagedDetails], IO Bool)
-stagedDetails' ps l repo = do
-	(ls, cleanup) <- pipeNullSplit params repo
-	return (map parse ls, cleanup)
+stagedDetails' ps l repo = guardSafeForLsFiles repo $ do
+	(ls, cleanup) <- pipeNullSplit' params repo
+	return (map parseStagedDetails ls, cleanup)
   where
 	params = Param "ls-files" : Param "--stage" : Param "-z" : ps ++ 
 		Param "--" : map (File . fromRawFilePath) l
-	parse s
-		| null file = (L.toStrict s, Nothing, Nothing)
-		| otherwise = (toRawFilePath file, extractSha $ take shaSize rest, readmode mode)
-	  where
-		(metadata, file) = separate (== '\t') (decodeBL' s)
-		(mode, rest) = separate (== ' ') metadata
-		readmode = fst <$$> headMaybe . readOct
+
+parseStagedDetails :: S.ByteString -> StagedDetails
+parseStagedDetails s
+	| S.null file = (s, Nothing, Nothing)
+	| otherwise = (file, extractSha sha, readmode mode)
+  where
+	(metadata, file) = separate' (== fromIntegral (ord '\t')) s
+	(mode, metadata') = separate' (== fromIntegral (ord ' ')) metadata
+	(sha, _) = separate' (== fromIntegral (ord ' ')) metadata'
+	readmode = fst <$$> headMaybe . readOct . decodeBS'
 
 {- Returns a list of the files in the specified locations that are staged
  - for commit, and whose type has changed. -}
@@ -181,7 +217,7 @@ typeChanged :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
 typeChanged = typeChanged' []
 
 typeChanged' :: [CommandParam] -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-typeChanged' ps l repo = do
+typeChanged' ps l repo = guardSafeForLsFiles repo $ do
 	(fs, cleanup) <- pipeNullSplit (prefix ++ ps ++ suffix) repo
 	-- git diff returns filenames relative to the top of the git repo;
 	-- convert to filenames relative to the cwd, like git ls-files.
@@ -221,7 +257,7 @@ data Unmerged = Unmerged
  - If a line is omitted, that side removed the file.
  -}
 unmerged :: [RawFilePath] -> Repo -> IO ([Unmerged], IO Bool)
-unmerged l repo = do
+unmerged l repo = guardSafeForLsFiles repo $ do
 	(fs, cleanup) <- pipeNullSplit params repo
 	return (reduceUnmerged [] $ catMaybes $ map (parseUnmerged . decodeBL') fs, cleanup)
   where
@@ -249,7 +285,7 @@ parseUnmerged s
 				then Nothing
 				else do
 					treeitemtype <- readTreeItemType (encodeBS rawtreeitemtype)
-					sha <- extractSha rawsha
+					sha <- extractSha (encodeBS' rawsha)
 					return $ InternalUnmerged (stage == 2) (toRawFilePath file)
 						(Just treeitemtype) (Just sha)
 		_ -> Nothing
@@ -278,3 +314,53 @@ reduceUnmerged c (i:is) = reduceUnmerged (new:c) rest
 		, itreeitemtype = Nothing
 		, isha = Nothing
 		}
+
+{- Gets the InodeCache equivilant information stored in the git index.
+ -
+ - Note that this uses a --debug option whose output could change at some
+ - point in the future. If the output is not as expected, will use Nothing.
+ -}
+inodeCaches :: [RawFilePath] -> Repo -> IO ([(FilePath, Maybe InodeCache)], IO Bool)
+inodeCaches locs repo = guardSafeForLsFiles repo $ do
+	(ls, cleanup) <- pipeNullSplit params repo
+	return (parse Nothing (map decodeBL ls), cleanup)
+  where
+	params = 
+		Param "ls-files" :
+		Param "--cached" :
+		Param "-z" :
+		Param "--debug" :
+		Param "--" :
+		map (File . fromRawFilePath) locs
+	
+	parse Nothing (f:ls) = parse (Just f) ls
+	parse (Just f) (s:[]) = 
+		let i = parsedebug s
+		in (f, i) : []
+	parse (Just f) (s:ls) =
+		let (d, f') = splitdebug s
+		    i = parsedebug d
+		in (f, i) : parse (Just f') ls
+	parse _ _ = []
+
+	-- First 5 lines are --debug output, remainder is the next filename.
+	-- This assumes that --debug does not start outputting more lines.
+	splitdebug s = case splitc '\n' s of
+		(d1:d2:d3:d4:d5:rest) ->
+			( intercalate "\n" [d1, d2, d3, d4, d5]
+			, intercalate "\n" rest
+			)
+		_ -> ("", s)
+	
+	-- This parser allows for some changes to the --debug output,
+	-- including reordering, or adding more items.
+	parsedebug s = do
+		let l = words s
+		let iskey v = ":" `isSuffixOf` v
+		let m = M.fromList $ zip
+			(filter iskey l)
+			(filter (not . iskey) l)
+		mkInodeCache
+			<$> (readish =<< M.lookup "ino:" m)
+			<*> (readish =<< M.lookup "size:" m)
+			<*> (parsePOSIXTime =<< (replace ":" "." <$> M.lookup "mtime:" m))

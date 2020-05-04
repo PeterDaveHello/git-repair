@@ -10,6 +10,7 @@
 
 module Utility.CoProcess (
 	CoProcessHandle,
+	CoProcessState(..),
 	start,
 	stop,
 	query,
