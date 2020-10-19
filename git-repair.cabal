@@ -39,7 +39,7 @@ source-repository head
 Executable git-repair
   Main-Is: git-repair.hs
   GHC-Options: -threaded -Wall -fno-warn-tabs -O2
-  Default-Language: Haskell98
+  Default-Language: Haskell2010
   Default-Extensions: LambdaCase
   Build-Depends: split, hslogger, directory, filepath, containers, mtl,
    unix-compat (>= 0.5), bytestring, exceptions (>= 0.6), transformers,
