@@ -3,3 +3,5 @@ tags
 git-repair
 dist
 dist-newstyle
+cabal.project.local
+cabal.project.local~
