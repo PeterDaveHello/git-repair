@@ -1,5 +1,5 @@
 Name: git-repair
-Version: 1.20200504
+Version: 1.20210111
 Cabal-Version: >= 1.10
 License: AGPL-3
 Maintainer: Joey Hess <joey@kitenet.net>
@@ -38,7 +38,7 @@ source-repository head
 
 Executable git-repair
   Main-Is: git-repair.hs
-  GHC-Options: -threaded -Wall -fno-warn-tabs -O2
+  GHC-Options: -threaded -Wall -fno-warn-tabs -Wincomplete-uni-patterns -O2
   Default-Language: Haskell2010
   Default-Extensions: LambdaCase
   Build-Depends: split, hslogger, directory, filepath, containers, mtl,

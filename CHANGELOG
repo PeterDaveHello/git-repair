@@ -1,11 +1,11 @@
-git-repair (1.20210111) UNRELEASED; urgency=medium
+git-repair (1.20210111) unstable; urgency=medium
 
   * Improve output to not give the impression it's stalled running fsck
     when it's found a problem and is working to repair it.
   * Merge from git-annex.
   * Makefile: Support building with cabal 3.0.
 
- -- Joey Hess <id@joeyh.name>  Mon, 11 Jan 2021 21:52:06 -0400
+ -- Joey Hess <id@joeyh.name>  Mon, 11 Jan 2021 22:00:49 -0400
 
 git-repair (1.20200504) unstable; urgency=medium
 
