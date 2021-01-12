@@ -1,6 +1,7 @@
 git-repair (1.20210111) UNRELEASED; urgency=medium
 
   * Merge from git-annex.
+  * Makefile: Support building with cabal 3.0.
 
  -- Joey Hess <id@joeyh.name>  Mon, 11 Jan 2021 21:52:06 -0400
 

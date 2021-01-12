@@ -7,9 +7,13 @@ PREFIX=/usr
 build: Build/SysConfig.hs
 	$(BUILDER) build $(BUILDEROPTIONS)
 	if [ "$(BUILDER)" = stack ]; then \
-		ln -sf $$(stack path --dist-dir)/build/git-annex/git-repair git-repair; \
+		ln -sf $$(stack path --dist-dir)/build/git-repair/git-repair git-repair; \
 	else \
-		ln -sf dist/build/git-repair/git-repair git-repair; \
+		if [ -d dist-newstyle ]; then \
+			ln -sf $$(cabal exec -- sh -c 'command -v git-repair') git-repair; \
+		else \
+			ln -sf dist/build/git-repair/git-repair git-repair; \
+		fi; \
 	fi
 	@$(MAKE) tags >/dev/null 2>&1 &
 
@@ -29,12 +33,26 @@ install: build
 
 clean:
 	rm -rf git-repair git-repair-test.log \
-		dist configure Build/SysConfig.hs Setup tags
+		dist dist-newstyle configure Build/SysConfig.hs Setup tags
 	find . -name \*.o -exec rm {} \;
 	find . -name \*.hi -exec rm {} \;
 
-# hothasktags chokes on some template haskell etc, so ignore errors
+# tags file for vim
 tags:
-	(for f in $$(find . | grep -v /.git/ | grep -v /tmp/ | grep -v /dist/ | grep -v /doc/ | egrep '\.hs$$'); do hothasktags -c --cpp -c -traditional -c --include=dist/build/autogen/cabal_macros.h $$f; done) 2>/dev/null | sort > tags
+	@$(MAKE) --quiet hothasktags HOTHASKTAGS_OPT= TAGFILE=tags
+
+# TAGS file for emacs
+TAGS:
+	@$(MAKE) --quiet hothasktags HOTHASKTAGS_OPT=-e TAGFILE=TAGS
+
+# https://github.com/luqui/hothasktags/issues/18
+HOTHASKTAGS_ARGS=-XLambdaCase -XPackageImports --cpp
+
+hothasktags:
+	@if ! cabal exec hothasktags -- $(HOTHASKTAGS_OPT) $(HOTHASKTAGS_ARGS) \
+		$$(find . | grep -v /.git/ | grep -v /tmp/ | grep -v dist/ | grep -v /doc/ | egrep '\.hs$$') 2>/dev/null \
+		| sort > $(TAGFILE); then \
+		echo "** hothasktags failed"; \
+	fi
 
 .PHONY: tags
