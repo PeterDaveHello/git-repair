@@ -1,0 +1,5 @@
+git-repair 1.20210111 released with [[!toggle text="these changes"]]
+[[!toggleable text="""  * Improve output to not give the impression it's stalled running fsck
+    when it's found a problem and is working to repair it.
+  * Merge from git-annex.
+  * Makefile: Support building with cabal 3.0."""]]
