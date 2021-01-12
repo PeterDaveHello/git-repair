@@ -1,6 +1,6 @@
 {- Temporary files.
  -
- - Copyright 2010-2013 Joey Hess <id@joeyh.name>
+ - Copyright 2010-2020 Joey Hess <id@joeyh.name>
  -
  - License: BSD-2-clause
  -}
@@ -20,16 +20,22 @@ import System.IO
 import System.FilePath
 import System.Directory
 import Control.Monad.IO.Class
-import System.PosixCompat.Files
+import System.PosixCompat.Files hiding (removeLink)
 
 import Utility.Exception
 import Utility.FileSystemEncoding
+import Utility.FileMode
 
 type Template = String
 
 {- Runs an action like writeFile, writing to a temp file first and
  - then moving it into place. The temp file is stored in the same
- - directory as the final file to avoid cross-device renames. -}
+ - directory as the final file to avoid cross-device renames.
+ -
+ - While this uses a temp file, the file will end up with the same
+ - mode as it would when using writeFile, unless the writer action changes
+ - it.
+ -}
 viaTmp :: (MonadMask m, MonadIO m) => (FilePath -> v -> m ()) -> FilePath -> v -> m ()
 viaTmp a file content = bracketIO setup cleanup use
   where
@@ -42,6 +48,11 @@ viaTmp a file content = bracketIO setup cleanup use
 		_ <- tryIO $ hClose h
 		tryIO $ removeFile tmpfile
 	use (tmpfile, h) = do
+		-- Make mode the same as if the file were created usually,
+		-- not as a temp file. (This may fail on some filesystems
+		-- that don't support file modes well, so ignore
+		-- exceptions.)
+		_ <- liftIO $ tryIO $ setFileMode tmpfile =<< defaultFileMode
 		liftIO $ hClose h
 		a tmpfile content
 		liftIO $ rename tmpfile file
@@ -54,7 +65,11 @@ withTmpFile template a = do
 	withTmpFileIn tmpdir template a
 
 {- Runs an action with a tmp file located in the specified directory,
- - then removes the file. -}
+ - then removes the file.
+ -
+ - Note that the tmp file will have a file mode that only allows the
+ - current user to access it.
+ -}
 withTmpFileIn :: (MonadIO m, MonadMask m) => FilePath -> Template -> (FilePath -> Handle -> m a) -> m a
 withTmpFileIn tmpdir template a = bracket create remove use
   where

@@ -58,8 +58,7 @@ fromTopFilePath p repo = P.combine (repoPath repo) (getTopFilePath p)
 
 {- The input FilePath can be absolute, or relative to the CWD. -}
 toTopFilePath :: RawFilePath -> Git.Repo -> IO TopFilePath
-toTopFilePath file repo = TopFilePath . toRawFilePath
-	<$> relPathDirToFile (fromRawFilePath (repoPath repo)) (fromRawFilePath file)
+toTopFilePath file repo = TopFilePath <$> relPathDirToFile (repoPath repo) file
 
 {- The input RawFilePath must already be relative to the top of the git
  - repository -}

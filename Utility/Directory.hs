@@ -16,26 +16,16 @@ module Utility.Directory (
 
 import Control.Monad
 import System.FilePath
-import System.PosixCompat.Files
+import System.PosixCompat.Files hiding (removeLink)
 import Control.Applicative
-import Control.Monad.IO.Class
-import Control.Monad.IfElse
 import System.IO.Unsafe (unsafeInterleaveIO)
-import System.IO.Error
 import Data.Maybe
 import Prelude
 
-#ifndef mingw32_HOST_OS
-import Utility.SafeCommand
-#endif
-
 import Utility.SystemDirectory
-import Utility.Path
-import Utility.Tmp
 import Utility.Exception
 import Utility.Monad
 import Utility.Applicative
-import Utility.PartialPrelude
 
 dirCruft :: FilePath -> Bool
 dirCruft "." = True
@@ -101,131 +91,9 @@ dirTreeRecursiveSkipping skipdir topdir = go [] [topdir]
 				=<< catchDefaultIO [] (dirContents dir)
 			go (subdirs++dir:c) dirs
 
-{- Moves one filename to another.
- - First tries a rename, but falls back to moving across devices if needed. -}
-moveFile :: FilePath -> FilePath -> IO ()
-moveFile src dest = tryIO (rename src dest) >>= onrename
-  where
-	onrename (Right _) = noop
-	onrename (Left e)
-		| isPermissionError e = rethrow
-		| isDoesNotExistError e = rethrow
-		| otherwise = viaTmp mv dest ""
-	  where
-		rethrow = throwM e
-
-		mv tmp _ = do
-		-- copyFile is likely not as optimised as
-		-- the mv command, so we'll use the command.
-		--
-		-- But, while Windows has a "mv", it does not seem very
-		-- reliable, so use copyFile there.
-#ifndef mingw32_HOST_OS	
-			-- If dest is a directory, mv would move the file
-			-- into it, which is not desired.
-			whenM (isdir dest) rethrow
-			ok <- boolSystem "mv" [Param "-f", Param src, Param tmp]
-			let e' = e
-#else
-			r <- tryIO $ copyFile src tmp
-			let (ok, e') = case r of
-				Left err -> (False, err)
-				Right _ -> (True, e)
-#endif
-			unless ok $ do
-				-- delete any partial
-				_ <- tryIO $ removeFile tmp
-				throwM e'
-
-#ifndef mingw32_HOST_OS	
-	isdir f = do
-		r <- tryIO $ getFileStatus f
-		case r of
-			(Left _) -> return False
-			(Right s) -> return $ isDirectory s
-#endif
-
-{- Removes a file, which may or may not exist, and does not have to
- - be a regular file.
+{- Use with an action that removes something, which may or may not exist.
  -
- - Note that an exception is thrown if the file exists but
- - cannot be removed. -}
-nukeFile :: FilePath -> IO ()
-nukeFile file = void $ tryWhenExists go
-  where
-#ifndef mingw32_HOST_OS
-	go = removeLink file
-#else
-	go = removeFile file
-#endif
-
-{- Like createDirectoryIfMissing True, but it will only create
- - missing parent directories up to but not including the directory
- - in the first parameter.
- -
- - For example, createDirectoryUnder "/tmp/foo" "/tmp/foo/bar/baz"
- - will create /tmp/foo/bar if necessary, but if /tmp/foo does not exist,
- - it will throw an exception.
- -
- - The exception thrown is the same that createDirectory throws if the
- - parent directory does not exist.
- -
- - If the second FilePath is not under the first
- - FilePath (or the same as it), it will fail with an exception
- - even if the second FilePath's parent directory already exists.
- -
- - Either or both of the FilePaths can be relative, or absolute.
- - They will be normalized as necessary.
- -
- - Note that, the second FilePath, if relative, is relative to the current
- - working directory, not to the first FilePath.
+ - If an exception is thrown due to it not existing, it is ignored.
  -}
-createDirectoryUnder :: FilePath -> FilePath -> IO ()
-createDirectoryUnder topdir dir =
-	createDirectoryUnder' topdir dir createDirectory
-
-createDirectoryUnder'
-	:: (MonadIO m, MonadCatch m)
-	=> FilePath
-	-> FilePath
-	-> (FilePath -> m ())
-	-> m ()
-createDirectoryUnder' topdir dir0 mkdir = do
-	p <- liftIO $ relPathDirToFile topdir dir0
-	let dirs = splitDirectories p
-	-- Catch cases where the dir is not beneath the topdir.
-	-- If the relative path between them starts with "..",
-	-- it's not. And on Windows, if they are on different drives,
-	-- the path will not be relative.
-	if headMaybe dirs == Just ".." || isAbsolute p
-		then liftIO $ ioError $ customerror userErrorType
-			("createDirectoryFrom: not located in " ++ topdir)
-		-- If dir0 is the same as the topdir, don't try to create
-		-- it, but make sure it does exist.
-		else if null dirs
-			then liftIO $ unlessM (doesDirectoryExist topdir) $
-				ioError $ customerror doesNotExistErrorType
-					"createDirectoryFrom: does not exist"
-			else createdirs $
-				map (topdir </>) (reverse (scanl1 (</>) dirs))
-  where
-	customerror t s = mkIOError t s Nothing (Just dir0)
-
-	createdirs [] = pure ()
-	createdirs (dir:[]) = createdir dir (liftIO . ioError)
-	createdirs (dir:dirs) = createdir dir $ \_ -> do
-		createdirs dirs
-		createdir dir (liftIO . ioError)
-
-	-- This is the same method used by createDirectoryIfMissing,
-	-- in particular the handling of errors that occur when the
-	-- directory already exists. See its source for explanation
-	-- of several subtleties.
-	createdir dir notexisthandler = tryIO (mkdir dir) >>= \case
-		Right () -> pure ()
-		Left e
-			| isDoesNotExistError e -> notexisthandler e
-			| isAlreadyExistsError e || isPermissionError e ->
-				liftIO $ unlessM (doesDirectoryExist dir) $
-					ioError e
-			| otherwise -> liftIO $ ioError e
+removeWhenExistsWith :: (a -> IO ()) -> a -> IO ()
+removeWhenExistsWith f a = void $ tryWhenExists $ f a

@@ -5,6 +5,8 @@
  - Licensed under the GNU AGPL version 3 or higher.
  -}
 
+{-# LANGUAGE OverloadedStrings #-}
+
 module Git.Repair (
 	runRepair,
 	runRepairOf,
@@ -35,13 +37,15 @@ import qualified Git.Ref as Ref
 import qualified Git.RefLog as RefLog
 import qualified Git.UpdateIndex as UpdateIndex
 import qualified Git.Branch as Branch
+import Utility.Directory.Create
 import Utility.Tmp.Dir
 import Utility.Rsync
 import Utility.FileMode
-import Utility.Tuple
+import qualified Utility.RawFilePath as R
 
 import qualified Data.Set as S
 import qualified Data.ByteString.Lazy as L
+import qualified System.FilePath.ByteString as P
 
 {- Given a set of bad objects found by git fsck, which may not
  - be complete, finds and removes all corrupt objects. -}
@@ -51,9 +55,9 @@ cleanCorruptObjects fsckresults r = do
 	mapM_ removeLoose (S.toList $ knownMissing fsckresults)
 	mapM_ removeBad =<< listLooseObjectShas r
   where
-	removeLoose s = nukeFile (looseObjectFile r s)
+	removeLoose s = removeWhenExistsWith R.removeLink (looseObjectFile r s)
 	removeBad s = do
-		void $ tryIO $ allowRead $  looseObjectFile r s
+		void $ tryIO $ allowRead $ looseObjectFile r s
 		whenM (isMissing s r) $
 			removeLoose s
 
@@ -77,10 +81,11 @@ explodePacks r = go =<< listPackFiles r
 		putStrLn "Unpacking all pack files."
 		forM_ packs $ \packfile -> do
 			moveFile packfile (tmpdir </> takeFileName packfile)
-			nukeFile $ packIdxFile packfile
+			removeWhenExistsWith R.removeLink
+				(packIdxFile (toRawFilePath packfile))
 		forM_ packs $ \packfile -> do
 			let tmp = tmpdir </> takeFileName packfile
-			allowRead tmp
+			allowRead (toRawFilePath tmp)
 			-- May fail, if pack file is corrupt.
 			void $ tryIO $
 				pipeWrite [Param "unpack-objects", Param "-r"] r $ \h ->
@@ -100,7 +105,7 @@ retrieveMissingObjects missing referencerepo r
 	| otherwise = withTmpDir "tmprepo" $ \tmpdir -> do
 		unlessM (boolSystem "git" [Param "init", File tmpdir]) $
 			error $ "failed to create temp repository in " ++ tmpdir
-		tmpr <- Config.read =<< Construct.fromAbsPath tmpdir
+		tmpr <- Config.read =<< Construct.fromAbsPath (toRawFilePath tmpdir)
 		rs <- Construct.fromRemotes r
 		stillmissing <- pullremotes tmpr rs fetchrefstags missing
 		if S.null (knownMissing stillmissing)
@@ -161,8 +166,8 @@ retrieveMissingObjects missing referencerepo r
 copyObjects :: Repo -> Repo -> IO Bool
 copyObjects srcr destr = rsync
 	[ Param "-qr"
-	, File $ addTrailingPathSeparator $ objectsDir srcr
-	, File $ addTrailingPathSeparator $ objectsDir destr
+	, File $ addTrailingPathSeparator $ fromRawFilePath $ objectsDir srcr
+	, File $ addTrailingPathSeparator $ fromRawFilePath $ objectsDir destr
 	]
 
 {- To deal with missing objects that cannot be recovered, resets any
@@ -240,18 +245,20 @@ getAllRefs' refdir = do
 explodePackedRefsFile :: Repo -> IO ()
 explodePackedRefsFile r = do
 	let f = packedRefsFile r
+	let f' = toRawFilePath f
 	whenM (doesFileExist f) $ do
 		rs <- mapMaybe parsePacked . lines
-			<$> catchDefaultIO "" (safeReadFile f)
+			<$> catchDefaultIO "" (safeReadFile f')
 		forM_ rs makeref
-		nukeFile f
+		removeWhenExistsWith R.removeLink f'
   where
 	makeref (sha, ref) = do
-		let gitd = fromRawFilePath (localGitDir r)
-		let dest = gitd </> fromRef ref
+		let gitd = localGitDir r
+		let dest = gitd P.</> fromRef' ref
+		let dest' = fromRawFilePath dest
 		createDirectoryUnder gitd (parentDir dest)
-		unlessM (doesFileExist dest) $
-			writeFile dest (fromRef sha)
+		unlessM (doesFileExist dest') $
+			writeFile dest' (fromRef sha)
 
 packedRefsFile :: Repo -> FilePath
 packedRefsFile r = fromRawFilePath (localGitDir r) </> "packed-refs"
@@ -266,7 +273,7 @@ parsePacked l = case words l of
 {- git-branch -d cannot be used to remove a branch that is directly
  - pointing to a corrupt commit. -}
 nukeBranchRef :: Branch -> Repo -> IO ()
-nukeBranchRef b r = nukeFile $ fromRawFilePath (localGitDir r) </> fromRef b
+nukeBranchRef b r = removeWhenExistsWith R.removeLink $ localGitDir r P.</> fromRef' b
 
 {- Finds the most recent commit to a branch that does not need any
  - of the missing objects. If the input branch is good as-is, returns it.
@@ -379,9 +386,8 @@ missingIndex r = not <$> doesFileExist (fromRawFilePath (localGitDir r) </> "ind
 partitionIndex :: Repo -> IO ([LsFiles.StagedDetails], [LsFiles.StagedDetails], IO Bool)
 partitionIndex r = do
 	(indexcontents, cleanup) <- LsFiles.stagedDetails [repoPath r] r
-	l <- forM indexcontents $ \i -> case i of
-		(_file, Just sha, Just _mode) -> (,) <$> isMissing sha r <*> pure i
-		_ -> pure (False, i)
+	l <- forM indexcontents $ \i@(_file, sha, _mode, _stagenum) -> 
+		(,) <$> isMissing sha r <*> pure i
 	let (bad, good) = partition fst l
 	return (map snd bad, map snd good, cleanup)
 
@@ -393,17 +399,16 @@ rewriteIndex r
 	| otherwise = do
 		(bad, good, cleanup) <- partitionIndex r
 		unless (null bad) $ do
-			nukeFile (indexFile r)
+			removeWhenExistsWith R.removeLink (indexFile r)
 			UpdateIndex.streamUpdateIndex r
 				=<< (catMaybes <$> mapM reinject good)
 		void cleanup
-		return $ map (fromRawFilePath . fst3) bad
+		return $ map (\(file,_, _, _) -> fromRawFilePath file) bad
   where
-	reinject (file, Just sha, Just mode) = case toTreeItemType mode of
+	reinject (file, sha, mode, _) = case toTreeItemType mode of
 		Nothing -> return Nothing
 		Just treeitemtype -> Just <$>
 			UpdateIndex.stageFile sha treeitemtype (fromRawFilePath file) r
-	reinject _ = return Nothing
 
 newtype GoodCommits = GoodCommits (S.Set Sha)
 
@@ -442,14 +447,13 @@ displayList items header
 preRepair :: Repo -> IO ()
 preRepair g = do
 	unlessM (validhead <$> catchDefaultIO "" (safeReadFile headfile)) $ do
-		nukeFile headfile
-		writeFile headfile "ref: refs/heads/master"
+		removeWhenExistsWith R.removeLink headfile
+		writeFile (fromRawFilePath headfile) "ref: refs/heads/master"
 	explodePackedRefsFile g
-	unless (repoIsLocalBare g) $ do
-		let f = indexFile g
-		void $ tryIO $ allowWrite f
+	unless (repoIsLocalBare g) $
+		void $ tryIO $ allowWrite $ indexFile g
   where
-	headfile = fromRawFilePath (localGitDir g) </> "HEAD"
+	headfile = localGitDir g P.</> "HEAD"
 	validhead s = "ref: refs/" `isPrefixOf` s
 		|| isJust (extractSha (encodeBS' s))
 
@@ -571,7 +575,7 @@ runRepair' removablebranch fsckresult forced referencerepo g = do
 			else successfulfinish modifiedbranches
 
 	corruptedindex = do
-		nukeFile (indexFile g)
+		removeWhenExistsWith R.removeLink (indexFile g)
 		-- The corrupted index can prevent fsck from finding other
 		-- problems, so re-run repair.
 		fsckresult' <- findBroken False g
@@ -615,7 +619,7 @@ runRepair' removablebranch fsckresult forced referencerepo g = do
 successfulRepair :: (Bool, [Branch]) -> Bool
 successfulRepair = fst
 
-safeReadFile :: FilePath -> IO String
+safeReadFile :: RawFilePath -> IO String
 safeReadFile f = do
 	allowRead f
-	readFileStrict f
+	readFileStrict (fromRawFilePath f)

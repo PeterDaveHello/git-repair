@@ -95,12 +95,12 @@ applyDamage ds r = do
 		case d of
 			Empty s -> withfile s $ \f ->
 				withSaneMode f $ do
-					nukeFile f
+					removeWhenExistsWith removeLink f
 					writeFile f ""
 			Reverse s -> withfile s $ \f ->
 				withSaneMode f $
 					B.writeFile f =<< B.reverse <$> B.readFile f
-			Delete s -> withfile s $ nukeFile
+			Delete s -> withfile s $ removeWhenExistsWith removeLink
 			AppendGarbage s garbage ->
 				withfile s $ \f ->
 					withSaneMode f $
@@ -145,4 +145,5 @@ applyDamage ds r = do
 		]
 
 withSaneMode :: FilePath -> IO () -> IO ()
-withSaneMode f = withModifiedFileMode f (addModes [ownerWriteMode, ownerReadMode])
+withSaneMode f = withModifiedFileMode (toRawFilePath f)
+	(addModes [ownerWriteMode, ownerReadMode])

@@ -1,3 +1,9 @@
+git-repair (1.20210111) UNRELEASED; urgency=medium
+
+  * Merge from git-annex.
+
+ -- Joey Hess <id@joeyh.name>  Mon, 11 Jan 2021 21:52:06 -0400
+
 git-repair (1.20200504) unstable; urgency=medium
 
   * Fix a few documentation typos.

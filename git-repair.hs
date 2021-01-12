@@ -93,7 +93,7 @@ runTest settings damage = withTmpDir "tmprepo" $ \tmpdir -> do
 		]
 	unless cloned $
 		error $ "failed to clone this repo"
-	g <- Git.Config.read =<< Git.Construct.fromPath cloneloc
+	g <- Git.Config.read =<< Git.Construct.fromPath (toRawFilePath cloneloc)
 	Git.Destroyer.applyDamage damage g
 	repairstatus <- catchMaybeIO $ Git.Repair.successfulRepair
 		<$> Git.Repair.runRepair Git.Repair.isTrackingBranch (forced settings) g

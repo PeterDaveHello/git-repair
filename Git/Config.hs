@@ -58,29 +58,37 @@ read' repo = go repo
 	go Repo { location = Local { gitdir = d } } = git_config d
 	go Repo { location = LocalUnknown d } = git_config d
 	go _ = assertLocal repo $ error "internal"
-	git_config d = withHandle StdoutHandle createProcessSuccess p $
-		hRead repo ConfigNullList
+	git_config d = withCreateProcess p (git_config' p)
 	  where
 		params = ["config", "--null", "--list"]
 		p = (proc "git" params)
 			{ cwd = Just (fromRawFilePath d)
 			, env = gitEnv repo
+			, std_out = CreatePipe 
 			}
+	git_config' p _ (Just hout) _ pid = 
+		forceSuccessProcess p pid
+			`after`
+		hRead repo ConfigNullList hout
+	git_config' _ _ _ _ _ = error "internal"
 
 {- Gets the global git config, returning a dummy Repo containing it. -}
 global :: IO (Maybe Repo)
 global = do
 	home <- myHomeDir
 	ifM (doesFileExist $ home </> ".gitconfig")
-		( do
-			repo <- withHandle StdoutHandle createProcessSuccess p $
-				hRead (Git.Construct.fromUnknown) ConfigNullList
-			return $ Just repo
+		( Just <$> withCreateProcess p go
 		, return Nothing
 		)
   where
 	params = ["config", "--null", "--list", "--global"]
 	p = (proc "git" params)
+		{ std_out = CreatePipe }
+	go _ (Just hout) _ pid = 
+		forceSuccessProcess p pid
+			`after`
+		hRead (Git.Construct.fromUnknown) ConfigNullList hout
+	go _ _ _ _ = error "internal"
 
 {- Reads git config from a handle and populates a repo with it. -}
 hRead :: Repo -> ConfigStyle -> Handle -> IO Repo
@@ -132,9 +140,9 @@ updateLocation' r l = do
 		Nothing -> return l
 		Just (ConfigValue d) -> do
 			{- core.worktree is relative to the gitdir -}
-			top <- absPath $ fromRawFilePath (gitdir l)
-			let p = absPathFrom top (fromRawFilePath d)
-			return $ l { worktree = Just (toRawFilePath p) }
+			top <- absPath (gitdir l)
+			let p = absPathFrom top d
+			return $ l { worktree = Just p }
 		Just NoConfigValue -> return l
 	return $ r { location = l' }
 
@@ -177,6 +185,10 @@ isTrueFalse' (ConfigValue s)
 	| s' == "0" = Just False
 	| s' == "" = Just False
 
+	-- Git treats any number other than 0 as true,
+	-- including negative numbers.
+	| S8.all (\c -> isDigit c || c == '-') s' = Just True
+
 	| otherwise = Nothing
   where
 	s' = S8.map toLower s
@@ -198,22 +210,30 @@ coreBare = "core.bare"
 
 {- Runs a command to get the configuration of a repo,
  - and returns a repo populated with the configuration, as well as the raw
- - output and any standard output of the command. -}
-fromPipe :: Repo -> String -> [CommandParam] -> ConfigStyle -> IO (Either SomeException (Repo, S.ByteString, S.ByteString))
-fromPipe r cmd params st = try $
-	withOEHandles createProcessSuccess p $ \(hout, herr) -> do
-		geterr <- async $ S.hGetContents herr
-		getval <- async $ S.hGetContents hout
-		val <- wait getval
-		err <- wait geterr
-		r' <- store val st r
-		return (r', val, err)
+ - output and the standard error of the command. -}
+fromPipe :: Repo -> String -> [CommandParam] -> ConfigStyle -> IO (Either SomeException (Repo, S.ByteString, String))
+fromPipe r cmd params st = tryNonAsync $ withCreateProcess p go
   where
-	p = proc cmd $ toCommand params
+	p = (proc cmd $ toCommand params)
+		{ std_out = CreatePipe
+		, std_err = CreatePipe
+		}
+	go _ (Just hout) (Just herr) pid =
+		withAsync (getstderr pid herr []) $ \errreader -> do
+			val <- S.hGetContents hout
+			err <- wait errreader
+			forceSuccessProcess p pid
+			r' <- store val st r
+			return (r', val, err)
+	go _ _ _ _ = error "internal"
+
+	getstderr pid herr c = hGetLineUntilExitOrEOF pid herr >>= \case
+		Just l -> getstderr pid herr (l:c)
+		Nothing -> return (unlines (reverse c))
 
 {- Reads git config from a specified file and returns the repo populated
  - with the configuration. -}
-fromFile :: Repo -> FilePath -> IO (Either SomeException (Repo, S.ByteString, S.ByteString))
+fromFile :: Repo -> FilePath -> IO (Either SomeException (Repo, S.ByteString, String))
 fromFile r f = fromPipe r "git"
 	[ Param "config"
 	, Param "--file"

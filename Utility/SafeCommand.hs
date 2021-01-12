@@ -16,18 +16,13 @@ module Utility.SafeCommand (
 	safeSystem,
 	safeSystem',
 	safeSystemEnv,
-	shellWrap,
-	shellEscape,
-	shellUnEscape,
 	segmentXargsOrdered,
 	segmentXargsUnordered,
-	prop_isomorphic_shellEscape,
-	prop_isomorphic_shellEscape_multiword,
 ) where
 
-import System.Exit
 import Utility.Process
-import Utility.Split
+
+import System.Exit
 import System.FilePath
 import Data.Char
 import Data.List
@@ -61,6 +56,8 @@ toCommand' (File s) = s
 
 -- | Run a system command, and returns True or False if it succeeded or failed.
 --
+-- (Throws an exception if the command is not found.)
+--
 -- This and other command running functions in this module log the commands
 -- run at debug level, using System.Log.Logger.
 boolSystem :: FilePath -> [CommandParam] -> IO Bool
@@ -81,53 +78,15 @@ safeSystem :: FilePath -> [CommandParam] -> IO ExitCode
 safeSystem command params = safeSystem' command params id
 
 safeSystem' :: FilePath -> [CommandParam] -> (CreateProcess -> CreateProcess) -> IO ExitCode
-safeSystem' command params mkprocess = do
-	(_, _, _, pid) <- createProcess p
-	waitForProcess pid
+safeSystem' command params mkprocess = 
+	withCreateProcess p $ \_ _ _ pid ->
+		waitForProcess pid
   where
 	p = mkprocess $ proc command (toCommand params)
 
 safeSystemEnv :: FilePath -> [CommandParam] -> Maybe [(String, String)] -> IO ExitCode
 safeSystemEnv command params environ = safeSystem' command params $ 
 	\p -> p { env = environ }
-
--- | Wraps a shell command line inside sh -c, allowing it to be run in a
--- login shell that may not support POSIX shell, eg csh.
-shellWrap :: String -> String
-shellWrap cmdline = "sh -c " ++ shellEscape cmdline
-
--- | Escapes a filename or other parameter to be safely able to be exposed to
--- the shell.
---
--- This method works for POSIX shells, as well as other shells like csh.
-shellEscape :: String -> String
-shellEscape f = "'" ++ escaped ++ "'"
-  where
-	-- replace ' with '"'"'
-	escaped = intercalate "'\"'\"'" $ splitc '\'' f
-
--- | Unescapes a set of shellEscaped words or filenames.
-shellUnEscape :: String -> [String]
-shellUnEscape [] = []
-shellUnEscape s = word : shellUnEscape rest
-  where
-	(word, rest) = findword "" s
-	findword w [] = (w, "")
-	findword w (c:cs)
-		| c == ' ' = (w, cs)
-		| c == '\'' = inquote c w cs
-		| c == '"' = inquote c w cs
-		| otherwise = findword (w++[c]) cs
-	inquote _ w [] = (w, "")
-	inquote q w (c:cs)
-		| c == q = findword w cs
-		| otherwise = inquote q (w++[c]) cs
-
--- | For quickcheck.
-prop_isomorphic_shellEscape :: String -> Bool
-prop_isomorphic_shellEscape s = [s] == (shellUnEscape . shellEscape) s
-prop_isomorphic_shellEscape_multiword :: [String] -> Bool
-prop_isomorphic_shellEscape_multiword s = s == (shellUnEscape . unwords . map shellEscape) s
 
 -- | Segments a list of filenames into groups that are all below the maximum
 --  command-line length limit.

@@ -1,6 +1,6 @@
 {- Running a long or expensive batch operation niced.
  -
- - Copyright 2013 Joey Hess <id@joeyh.name>
+ - Copyright 2013-2020 Joey Hess <id@joeyh.name>
  -
  - License: BSD-2-clause
  -}
@@ -10,6 +10,7 @@
 module Utility.Batch (
 	batch,
 	BatchCommandMaker,
+	nonBatchCommandMaker,
 	getBatchCommandMaker,
 	toBatchCommand,
 	batchCommand,
@@ -22,7 +23,6 @@ import Common
 import Control.Concurrent.Async
 import System.Posix.Process
 #endif
-import qualified Control.Exception as E
 
 {- Runs an operation, at batch priority.
  -
@@ -42,16 +42,17 @@ batch a = wait =<< batchthread
 	batchthread = asyncBound $ do
 		setProcessPriority 0 maxNice
 		a
+	maxNice = 19
 #else
 batch a = a
 #endif
 
-maxNice :: Int
-maxNice = 19
-
 {- Makes a command be run by whichever of nice, ionice, and nocache
  - are available in the path. -}
 type BatchCommandMaker = (String, [CommandParam]) -> (String, [CommandParam])
+
+nonBatchCommandMaker :: BatchCommandMaker
+nonBatchCommandMaker = id
 
 getBatchCommandMaker :: IO BatchCommandMaker
 getBatchCommandMaker = do
@@ -75,11 +76,7 @@ toBatchCommand v = do
 	return $ batchmaker v
 
 {- Runs a command in a way that's suitable for batch jobs that can be
- - interrupted.
- -
- - If the calling thread receives an async exception, it sends the
- - command a SIGTERM, and after the command finishes shuttting down,
- - it re-raises the async exception. -}
+ - interrupted. -}
 batchCommand :: String -> [CommandParam] -> IO Bool
 batchCommand command params = batchCommandEnv command params Nothing
 
@@ -87,13 +84,4 @@ batchCommandEnv :: String -> [CommandParam] -> Maybe [(String, String)] -> IO Bo
 batchCommandEnv command params environ = do
 	batchmaker <- getBatchCommandMaker
 	let (command', params') = batchmaker (command, params)
-	let p = proc command' $ toCommand params'
-	(_, _, _, pid) <- createProcess $ p { env = environ }
-	r <- E.try (waitForProcess pid) :: IO (Either E.SomeException ExitCode)
-	case r of
-		Right ExitSuccess -> return True
-		Right _ -> return False
-		Left asyncexception -> do
-			terminateProcess pid
-			void $ waitForProcess pid
-			E.throwIO asyncexception
+	boolSystemEnv command' params' environ

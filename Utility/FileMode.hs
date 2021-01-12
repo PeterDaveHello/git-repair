@@ -1,11 +1,12 @@
 {- File mode utilities.
  -
- - Copyright 2010-2017 Joey Hess <id@joeyh.name>
+ - Copyright 2010-2020 Joey Hess <id@joeyh.name>
  -
  - License: BSD-2-clause
  -}
 
 {-# LANGUAGE CPP #-}
+{-# OPTIONS_GHC -fno-warn-tabs #-}
 
 module Utility.FileMode (
 	module Utility.FileMode,
@@ -15,32 +16,30 @@ module Utility.FileMode (
 import System.IO
 import Control.Monad
 import System.PosixCompat.Types
-import System.PosixCompat.Files
-#ifndef mingw32_HOST_OS
-import System.Posix.Files (symbolicLinkMode)
-import Control.Monad.IO.Class (liftIO)
-#endif
-import Control.Monad.IO.Class (MonadIO)
+import System.PosixCompat.Files hiding (removeLink)
+import Control.Monad.IO.Class
 import Foreign (complement)
 import Control.Monad.Catch
 
 import Utility.Exception
+import Utility.FileSystemEncoding
+import qualified Utility.RawFilePath as R
 
 {- Applies a conversion function to a file's mode. -}
-modifyFileMode :: FilePath -> (FileMode -> FileMode) -> IO ()
+modifyFileMode :: RawFilePath -> (FileMode -> FileMode) -> IO ()
 modifyFileMode f convert = void $ modifyFileMode' f convert
 
-modifyFileMode' :: FilePath -> (FileMode -> FileMode) -> IO FileMode
+modifyFileMode' :: RawFilePath -> (FileMode -> FileMode) -> IO FileMode
 modifyFileMode' f convert = do
-	s <- getFileStatus f
+	s <- R.getFileStatus f
 	let old = fileMode s
 	let new = convert old
 	when (new /= old) $
-		setFileMode f new
+		R.setFileMode f new
 	return old
 
 {- Runs an action after changing a file's mode, then restores the old mode. -}
-withModifiedFileMode :: FilePath -> (FileMode -> FileMode) -> IO a -> IO a
+withModifiedFileMode :: RawFilePath -> (FileMode -> FileMode) -> IO a -> IO a
 withModifiedFileMode file convert a = bracket setup cleanup go
   where
 	setup = modifyFileMode' file convert
@@ -73,15 +72,15 @@ otherGroupModes =
 	]
 
 {- Removes the write bits from a file. -}
-preventWrite :: FilePath -> IO ()
+preventWrite :: RawFilePath -> IO ()
 preventWrite f = modifyFileMode f $ removeModes writeModes
 
 {- Turns a file's owner write bit back on. -}
-allowWrite :: FilePath -> IO ()
+allowWrite :: RawFilePath -> IO ()
 allowWrite f = modifyFileMode f $ addModes [ownerWriteMode]
 
 {- Turns a file's owner read bit back on. -}
-allowRead :: FilePath -> IO ()
+allowRead :: RawFilePath -> IO ()
 allowRead f = modifyFileMode f $ addModes [ownerReadMode]
 
 {- Allows owner and group to read and write to a file. -}
@@ -91,19 +90,11 @@ groupSharedModes =
 	, ownerReadMode, groupReadMode
 	]
 
-groupWriteRead :: FilePath -> IO ()
+groupWriteRead :: RawFilePath -> IO ()
 groupWriteRead f = modifyFileMode f $ addModes groupSharedModes
 
 checkMode :: FileMode -> FileMode -> Bool
 checkMode checkfor mode = checkfor `intersectFileModes` mode == checkfor
-
-{- Checks if a file mode indicates it's a symlink. -}
-isSymLink :: FileMode -> Bool
-#ifdef mingw32_HOST_OS
-isSymLink _ = False
-#else
-isSymLink = checkMode symbolicLinkMode
-#endif
 
 {- Checks if a file has any executable bits set. -}
 isExecutable :: FileMode -> Bool
@@ -160,7 +151,7 @@ isSticky = checkMode stickyMode
 stickyMode :: FileMode
 stickyMode = 512
 
-setSticky :: FilePath -> IO ()
+setSticky :: RawFilePath -> IO ()
 setSticky f = modifyFileMode f $ addModes [stickyMode]
 #endif
 
@@ -173,13 +164,13 @@ setSticky f = modifyFileMode f $ addModes [stickyMode]
  - On a filesystem that does not support file permissions, this is the same
  - as writeFile.
  -}
-writeFileProtected :: FilePath -> String -> IO ()
+writeFileProtected :: RawFilePath -> String -> IO ()
 writeFileProtected file content = writeFileProtected' file 
 	(\h -> hPutStr h content)
 
-writeFileProtected' :: FilePath -> (Handle -> IO ()) -> IO ()
+writeFileProtected' :: RawFilePath -> (Handle -> IO ()) -> IO ()
 writeFileProtected' file writer = protectedOutput $
-	withFile file WriteMode $ \h -> do
+	withFile (fromRawFilePath file) WriteMode $ \h -> do
 		void $ tryIO $ modifyFileMode file $ removeModes otherGroupModes
 		writer h
 

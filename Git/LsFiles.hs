@@ -1,22 +1,24 @@
 {- git ls-files interface
  -
- - Copyright 2010-2019 Joey Hess <id@joeyh.name>
+ - Copyright 2010-2020 Joey Hess <id@joeyh.name>
  -
  - Licensed under the GNU AGPL version 3 or higher.
  -}
 
 module Git.LsFiles (
+	Options(..),
 	inRepo,
+	inRepoDetails,
 	inRepoOrBranch,
 	notInRepo,
 	notInRepoIncludingEmptyDirectories,
 	allFiles,
 	deleted,
 	modified,
-	modifiedOthers,
 	staged,
 	stagedNotDeleted,
-	stagedOthersDetails,
+	usualStageNum,
+	mergeConflictHeadStageNum,
 	stagedDetails,
 	typeChanged,
 	typeChangedStaged,
@@ -34,12 +36,15 @@ import Git.Types
 import Git.Sha
 import Utility.InodeCache
 import Utility.TimeStamp
+import Utility.Attoparsec
+import qualified Utility.RawFilePath as R
 
-import Numeric
-import Data.Char
 import System.Posix.Types
 import qualified Data.Map as M
 import qualified Data.ByteString as S
+import qualified Data.Attoparsec.ByteString as A
+import qualified Data.Attoparsec.ByteString.Char8 as A8
+import qualified System.FilePath.ByteString as P
 
 {- It's only safe to use git ls-files on the current repo, not on a remote.
  -
@@ -63,101 +68,75 @@ guardSafeForLsFiles r a
 	| safeForLsFiles r = a
 	| otherwise = error $ "git ls-files is unsafe to run on repository " ++ repoDescribe r
 
+data Options = ErrorUnmatch
+
+opParam :: Options -> CommandParam
+opParam ErrorUnmatch = Param "--error-unmatch"
+
 {- Lists files that are checked into git's index at the specified paths.
  - With no paths, all files are listed.
  -}
-inRepo :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-inRepo = inRepo' [] 
+inRepo :: [Options] -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+inRepo = inRepo' [Param "--cached"] 
 
-inRepo' :: [CommandParam] -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-inRepo' ps l repo = guardSafeForLsFiles repo $ pipeNullSplit' params repo
+inRepo' :: [CommandParam] -> [Options] -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+inRepo' ps os l repo = guardSafeForLsFiles repo $ pipeNullSplit' params repo
   where
 	params = 
 		Param "ls-files" :
-		Param "--cached" :
 		Param "-z" :
-		ps ++
+		map opParam os ++ ps ++
 		(Param "--" : map (File . fromRawFilePath) l)
+
+{- Lists the same files inRepo does, but with sha and mode. -}
+inRepoDetails :: [Options] -> [RawFilePath] -> Repo -> IO ([(RawFilePath, Sha, FileMode)], IO Bool)
+inRepoDetails = stagedDetails' parser . map opParam
+  where
+	parser s = case parseStagedDetails s of
+		Just (file, sha, mode, stagenum)
+			| stagenum == usualStageNum || stagenum == mergeConflictHeadStageNum ->
+				Just (file, sha, mode)
+		_ -> Nothing
 
 {- Files that are checked into the index or have been committed to a
  - branch. -}
-inRepoOrBranch :: Branch -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-inRepoOrBranch b = inRepo' [Param $ "--with-tree=" ++ fromRef b]
+inRepoOrBranch :: Branch -> [Options] -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+inRepoOrBranch b = inRepo'
+	[ Param "--cached"
+	, Param ("--with-tree=" ++ fromRef b)
+	]
 
 {- Scans for files at the specified locations that are not checked into git. -}
-notInRepo :: Bool -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+notInRepo :: [Options] -> Bool -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
 notInRepo = notInRepo' []
 
-notInRepo' :: [CommandParam] -> Bool -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-notInRepo' ps include_ignored l repo = guardSafeForLsFiles repo $
-	pipeNullSplit' params repo
+notInRepo' :: [CommandParam] -> [Options] -> Bool -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+notInRepo' ps os include_ignored = 
+	inRepo' (Param "--others" : ps ++ exclude) os
   where
-	params = concat
-		[ [ Param "ls-files", Param "--others"]
-		, ps
-		, exclude
-		, [ Param "-z", Param "--" ]
-		, map (File . fromRawFilePath) l
-		]
 	exclude
 		| include_ignored = []
 		| otherwise = [Param "--exclude-standard"]
 
 {- Scans for files at the specified locations that are not checked into
  - git. Empty directories are included in the result. -}
-notInRepoIncludingEmptyDirectories :: Bool -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+notInRepoIncludingEmptyDirectories :: [Options] -> Bool -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
 notInRepoIncludingEmptyDirectories = notInRepo' [Param "--directory"]
 
 {- Finds all files in the specified locations, whether checked into git or
  - not. -}
-allFiles :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-allFiles l repo = guardSafeForLsFiles repo $ pipeNullSplit' params repo
-  where
-	params =
-		Param "ls-files" :
-		Param "--cached" :
-		Param "--others" :
-		Param "-z" :
-		Param "--" :
-		map (File . fromRawFilePath) l
+allFiles :: [Options] -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+allFiles = inRepo' [Param "--cached", Param "--others"]
 
 {- Returns a list of files in the specified locations that have been
  - deleted. -}
-deleted :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-deleted l repo = guardSafeForLsFiles repo $ pipeNullSplit' params repo
-  where
-	params =
-		Param "ls-files" :
-		Param "--deleted" :
-		Param "-z" :
-		Param "--" :
-		map (File . fromRawFilePath) l
+deleted :: [Options] -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+deleted = inRepo' [Param "--deleted"]
 
 {- Returns a list of files in the specified locations that have been
  - modified. -}
-modified :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-modified l repo = guardSafeForLsFiles repo $ pipeNullSplit' params repo
-  where
-	params = 
-		Param "ls-files" :
-		Param "--modified" :
-		Param "-z" :
-		Param "--" :
-		map (File . fromRawFilePath) l
-
-{- Files that have been modified or are not checked into git (and are not
- - ignored). -}
-modifiedOthers :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
-modifiedOthers l repo = guardSafeForLsFiles repo $ pipeNullSplit' params repo
-  where
-	params = 
-		Param "ls-files" :
-		Param "--modified" :
-		Param "--others" :
-		Param "--exclude-standard" :
-		Param "-z" :
-		Param "--" :
-		map (File . fromRawFilePath) l
+modified :: [Options] -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
+modified = inRepo' [Param "--modified"]
 
 {- Returns a list of all files that are staged for commit. -}
 staged :: [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
@@ -175,36 +154,49 @@ staged' ps l repo = guardSafeForLsFiles repo $
 	prefix = [Param "diff", Param "--cached", Param "--name-only", Param "-z"]
 	suffix = Param "--" : map (File . fromRawFilePath) l
 
-type StagedDetails = (RawFilePath, Maybe Sha, Maybe FileMode)
+type StagedDetails = (RawFilePath, Sha, FileMode, StageNum)
 
-{- Returns details about files that are staged in the index,
- - as well as files not yet in git. Skips ignored files. -}
-stagedOthersDetails :: [RawFilePath] -> Repo -> IO ([StagedDetails], IO Bool)
-stagedOthersDetails = stagedDetails' [Param "--others", Param "--exclude-standard"]
+type StageNum = Int
 
-{- Returns details about all files that are staged in the index. -}
+{- Used when not in a merge conflict. -}
+usualStageNum :: Int
+usualStageNum = 0
+
+{- WHen in a merge conflict, git uses stage number 2 for the local HEAD
+ - side of the merge conflict. -}
+mergeConflictHeadStageNum :: Int
+mergeConflictHeadStageNum = 2
+
+{- Returns details about all files that are staged in the index.
+ -
+ - Note that, during a conflict, a file will appear in the list
+ - more than once with different stage numbers.
+ -}
 stagedDetails :: [RawFilePath] -> Repo -> IO ([StagedDetails], IO Bool)
-stagedDetails = stagedDetails' []
+stagedDetails = stagedDetails' parseStagedDetails []
 
-{- Gets details about staged files, including the Sha of their staged
- - contents. -}
-stagedDetails' :: [CommandParam] -> [RawFilePath] -> Repo -> IO ([StagedDetails], IO Bool)
-stagedDetails' ps l repo = guardSafeForLsFiles repo $ do
+stagedDetails' :: (S.ByteString -> Maybe t) -> [CommandParam] -> [RawFilePath] -> Repo -> IO ([t], IO Bool)
+stagedDetails' parser ps l repo = guardSafeForLsFiles repo $ do
 	(ls, cleanup) <- pipeNullSplit' params repo
-	return (map parseStagedDetails ls, cleanup)
+	return (mapMaybe parser ls, cleanup)
   where
 	params = Param "ls-files" : Param "--stage" : Param "-z" : ps ++ 
 		Param "--" : map (File . fromRawFilePath) l
 
-parseStagedDetails :: S.ByteString -> StagedDetails
-parseStagedDetails s
-	| S.null file = (s, Nothing, Nothing)
-	| otherwise = (file, extractSha sha, readmode mode)
+parseStagedDetails :: S.ByteString -> Maybe StagedDetails
+parseStagedDetails = eitherToMaybe . A.parseOnly parser
   where
-	(metadata, file) = separate' (== fromIntegral (ord '\t')) s
-	(mode, metadata') = separate' (== fromIntegral (ord ' ')) metadata
-	(sha, _) = separate' (== fromIntegral (ord ' ')) metadata'
-	readmode = fst <$$> headMaybe . readOct . decodeBS'
+	parser = do
+		mode <- octal
+		void $ A8.char ' '
+		sha <- maybe (fail "bad sha") return . extractSha =<< nextword
+		void $ A8.char ' '
+		stagenum <- A8.decimal
+		void $ A8.char '\t'
+		file <- A.takeByteString
+		return (file, sha, mode, stagenum)
+	
+	nextword = A8.takeTill (== ' ')
 
 {- Returns a list of the files in the specified locations that are staged
  - for commit, and whose type has changed. -}
@@ -218,12 +210,12 @@ typeChanged = typeChanged' []
 
 typeChanged' :: [CommandParam] -> [RawFilePath] -> Repo -> IO ([RawFilePath], IO Bool)
 typeChanged' ps l repo = guardSafeForLsFiles repo $ do
-	(fs, cleanup) <- pipeNullSplit (prefix ++ ps ++ suffix) repo
+	(fs, cleanup) <- pipeNullSplit' (prefix ++ ps ++ suffix) repo
 	-- git diff returns filenames relative to the top of the git repo;
 	-- convert to filenames relative to the cwd, like git ls-files.
-	top <- absPath (fromRawFilePath (repoPath repo))
-	currdir <- getCurrentDirectory
-	return (map (\f -> toRawFilePath (relPathDirToFileAbs currdir $ top </> decodeBL' f)) fs, cleanup)
+	top <- absPath (repoPath repo)
+	currdir <- R.getCurrentDirectory
+	return (map (\f -> relPathDirToFileAbs currdir $ top P.</> f) fs, cleanup)
   where
 	prefix = 
 		[ Param "diff"

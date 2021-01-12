@@ -36,17 +36,18 @@ import Foreign.C
 import System.IO
 import System.IO.Unsafe
 import Data.Word
-import Data.List
+import System.FilePath.ByteString (RawFilePath, encodeFilePath, decodeFilePath)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 #ifdef mingw32_HOST_OS
 import qualified Data.ByteString.UTF8 as S8
 import qualified Data.ByteString.Lazy.UTF8 as L8
+#else
+import Data.List
+import Utility.Split
 #endif
-import System.FilePath.ByteString (RawFilePath, encodeFilePath, decodeFilePath)
 
 import Utility.Exception
-import Utility.Split
 
 {- Makes all subsequent Handles that are opened, as well as stdio Handles,
  - use the filesystem encoding, instead of the encoding of the current
@@ -178,6 +179,7 @@ fromRawFilePath = decodeFilePath
 toRawFilePath :: FilePath -> RawFilePath
 toRawFilePath = encodeFilePath
 
+#ifndef mingw32_HOST_OS
 {- Converts a [Word8] to a FilePath, encoding using the filesystem encoding.
  -
  - w82s produces a String, which may contain Chars that are invalid
@@ -206,6 +208,7 @@ decodeW8NUL :: FilePath -> [Word8]
 decodeW8NUL = intercalate [c2w8 nul] . map decodeW8 . splitc nul
   where
 	nul = '\NUL'
+#endif
 
 c2w8 :: Char -> Word8
 c2w8 = fromIntegral . fromEnum

@@ -6,12 +6,11 @@
  - License: BSD-2-clause
  -}
 
-{-# LANGUAGE CPP, Rank2Types #-}
+{-# LANGUAGE CPP, Rank2Types, LambdaCase #-}
 {-# OPTIONS_GHC -fno-warn-tabs #-}
 
 module Utility.Process (
 	module X,
-	CreateProcess(..),
 	StdHandle(..),
 	readProcess,
 	readProcess',
@@ -20,42 +19,32 @@ module Utility.Process (
 	forceSuccessProcess,
 	forceSuccessProcess',
 	checkSuccessProcess,
-	ignoreFailureProcess,
-	createProcessSuccess,
-	createProcessChecked,
-	createBackgroundProcess,
-	withHandle,
-	withIOHandles,
-	withOEHandles,
 	withNullHandle,
-	withQuietOutput,
-	feedWithQuietOutput,
 	createProcess,
+	withCreateProcess,
 	waitForProcess,
+	cleanupProcess,
+	hGetLineUntilExitOrEOF,
 	startInteractiveProcess,
 	stdinHandle,
 	stdoutHandle,
 	stderrHandle,
-	ioHandles,
 	processHandle,
 	devNull,
 ) where
 
 import qualified Utility.Process.Shim
-import qualified Utility.Process.Shim as X hiding (CreateProcess(..), createProcess, runInteractiveProcess, readProcess, readProcessWithExitCode, system, rawSystem, runInteractiveCommand, runProcess)
-import Utility.Process.Shim hiding (createProcess, readProcess, waitForProcess)
+import Utility.Process.Shim as X (CreateProcess(..), ProcessHandle, StdStream(..), CmdSpec(..), proc, getPid, getProcessExitCode, shell, terminateProcess, interruptProcessGroupOf)
 import Utility.Misc
 import Utility.Exception
+import Utility.Monad
 
 import System.Exit
 import System.IO
 import System.Log.Logger
-import Control.Concurrent
-import qualified Control.Exception as E
-import Control.Monad
+import Control.Monad.IO.Class
+import Control.Concurrent.Async
 import qualified Data.ByteString as S
-
-type CreateProcessRunner = forall a. CreateProcess -> ((Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> IO a) -> IO a
 
 data StdHandle = StdinHandle | StdoutHandle | StderrHandle
 	deriving (Eq)
@@ -63,21 +52,22 @@ data StdHandle = StdinHandle | StdoutHandle | StderrHandle
 -- | Normally, when reading from a process, it does not need to be fed any
 -- standard input.
 readProcess :: FilePath	-> [String] -> IO String
-readProcess cmd args = readProcessEnv cmd args Nothing
+readProcess cmd args = readProcess' (proc cmd args)
 
 readProcessEnv :: FilePath -> [String] -> Maybe [(String, String)] -> IO String
-readProcessEnv cmd args environ = readProcess' p
-  where
-	p = (proc cmd args)
-		{ std_out = CreatePipe
-		, env = environ
-		}
+readProcessEnv cmd args environ = 
+	readProcess' $ (proc cmd args) { env = environ }
 
 readProcess' :: CreateProcess -> IO String
-readProcess' p = withHandle StdoutHandle createProcessSuccess p $ \h -> do
-	output  <- hGetContentsStrict h
-	hClose h
-	return output
+readProcess' p = withCreateProcess p' go
+  where
+	p' = p { std_out = CreatePipe }
+	go _ (Just h) _ pid = do
+		output  <- hGetContentsStrict h
+		hClose h
+		forceSuccessProcess p' pid
+		return output
+	go _ _ _ _ = error "internal"
 
 -- | Runs an action to write to a process on its stdin, 
 -- returns its output, and also allows specifying the environment.
@@ -87,26 +77,7 @@ writeReadProcessEnv
 	-> Maybe [(String, String)]
 	-> (Maybe (Handle -> IO ()))
 	-> IO S.ByteString
-writeReadProcessEnv cmd args environ writestdin = do
-	(Just inh, Just outh, _, pid) <- createProcess p
-
-	-- fork off a thread to start consuming the output
-	outMVar <- newEmptyMVar
-	_ <- forkIO $ putMVar outMVar =<< S.hGetContents outh
-
-	-- now write and flush any input
-	maybe (return ()) (\a -> a inh >> hFlush inh) writestdin
-	hClose inh -- done with stdin
-
-	-- wait on the output
-	output <- takeMVar outMVar
-	hClose outh
-
-	-- wait on the process
-	forceSuccessProcess p pid
-
-	return output
-
+writeReadProcessEnv cmd args environ writestdin = withCreateProcess p go
   where
 	p = (proc cmd args)
 		{ std_in = CreatePipe
@@ -114,6 +85,18 @@ writeReadProcessEnv cmd args environ writestdin = do
 		, std_err = Inherit
 		, env = environ
 		}
+	
+	go (Just inh) (Just outh) _ pid = do
+		let reader = hClose outh `after` S.hGetContents outh
+		let writer = do
+			maybe (return ()) (\a -> a inh >> hFlush inh) writestdin
+			hClose inh
+		(output, ()) <- concurrently reader writer
+
+		forceSuccessProcess p pid
+
+		return output
+	go _ _ _ _ = error "internal"
 
 -- | Waits for a ProcessHandle, and throws an IOError if the process
 -- did not exit successfully.
@@ -126,117 +109,15 @@ forceSuccessProcess' p (ExitFailure n) = fail $
 	showCmd p ++ " exited " ++ show n
 
 -- | Waits for a ProcessHandle and returns True if it exited successfully.
--- Note that using this with createProcessChecked will throw away
--- the Bool, and is only useful to ignore the exit code of a process,
--- while still waiting for it. -}
 checkSuccessProcess :: ProcessHandle -> IO Bool
 checkSuccessProcess pid = do
 	code <- waitForProcess pid
 	return $ code == ExitSuccess
 
-ignoreFailureProcess :: ProcessHandle -> IO Bool
-ignoreFailureProcess pid = do
-	void $ waitForProcess pid
-	return True
-
--- | Runs createProcess, then an action on its handles, and then
--- forceSuccessProcess.
-createProcessSuccess :: CreateProcessRunner
-createProcessSuccess p a = createProcessChecked (forceSuccessProcess p) p a
-
--- | Runs createProcess, then an action on its handles, and then
--- a checker action on its exit code, which must wait for the process.
-createProcessChecked :: (ProcessHandle -> IO b) -> CreateProcessRunner
-createProcessChecked checker p a = do
-	t@(_, _, _, pid) <- createProcess p
-	r <- tryNonAsync $ a t
-	_ <- checker pid
-	either E.throw return r
-
--- | Leaves the process running, suitable for lazy streaming.
--- Note: Zombies will result, and must be waited on.
-createBackgroundProcess :: CreateProcessRunner
-createBackgroundProcess p a = a =<< createProcess p
-
--- | Runs a CreateProcessRunner, on a CreateProcess structure, that
--- is adjusted to pipe only from/to a single StdHandle, and passes
--- the resulting Handle to an action.
-withHandle
-	:: StdHandle
-	-> CreateProcessRunner
-	-> CreateProcess
-	-> (Handle -> IO a)
-	-> IO a
-withHandle h creator p a = creator p' $ a . select
-  where
-	base = p
-		{ std_in = Inherit
-		, std_out = Inherit
-		, std_err = Inherit
-		}
-	(select, p') = case h of
-		StdinHandle -> (stdinHandle, base { std_in = CreatePipe })
-		StdoutHandle -> (stdoutHandle, base { std_out = CreatePipe })
-		StderrHandle -> (stderrHandle, base { std_err = CreatePipe })
-
--- | Like withHandle, but passes (stdin, stdout) handles to the action.
-withIOHandles
-	:: CreateProcessRunner
-	-> CreateProcess
-	-> ((Handle, Handle) -> IO a)
-	-> IO a
-withIOHandles creator p a = creator p' $ a . ioHandles
-  where
-	p' = p
-		{ std_in = CreatePipe
-		, std_out = CreatePipe
-		, std_err = Inherit
-		}
-
--- | Like withHandle, but passes (stdout, stderr) handles to the action.
-withOEHandles
-	:: CreateProcessRunner
-	-> CreateProcess
-	-> ((Handle, Handle) -> IO a)
-	-> IO a
-withOEHandles creator p a = creator p' $ a . oeHandles
-  where
-	p' = p
-		{ std_in = Inherit
-		, std_out = CreatePipe
-		, std_err = CreatePipe
-		}
-
-withNullHandle :: (Handle -> IO a) -> IO a
-withNullHandle = withFile devNull WriteMode
-
--- | Forces the CreateProcessRunner to run quietly;
--- both stdout and stderr are discarded.
-withQuietOutput
-	:: CreateProcessRunner
-	-> CreateProcess
-	-> IO ()
-withQuietOutput creator p = withNullHandle $ \nullh -> do
-	let p' = p
-		{ std_out = UseHandle nullh
-		, std_err = UseHandle nullh
-		}
-	creator p' $ const $ return ()
-
--- | Stdout and stderr are discarded, while the process is fed stdin
--- from the handle.
-feedWithQuietOutput
-	:: CreateProcessRunner
-	-> CreateProcess
-	-> (Handle -> IO a)
-	-> IO a
-feedWithQuietOutput creator p a = withFile devNull WriteMode $ \nullh -> do
-	let p' = p
-		{ std_in = CreatePipe
-		, std_out = UseHandle nullh
-		, std_err = UseHandle nullh
-		}
-	creator p' $ a . stdinHandle
+withNullHandle :: (MonadIO m, MonadMask m) => (Handle -> m a) -> m a
+withNullHandle = bracket
+	(liftIO $ openFile devNull WriteMode)
+	(liftIO . hClose)
 
 devNull :: FilePath
 #ifndef mingw32_HOST_OS
@@ -252,6 +133,7 @@ devNull = "\\\\.\\NUL"
 -- Get it wrong and the runtime crash will always happen, so should be
 -- easily noticed.
 type HandleExtractor = (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> Handle
+
 stdinHandle :: HandleExtractor
 stdinHandle (Just h, _, _, _) = h
 stdinHandle _ = error "expected stdinHandle"
@@ -261,12 +143,6 @@ stdoutHandle _ = error "expected stdoutHandle"
 stderrHandle :: HandleExtractor
 stderrHandle (_, _, Just h, _) = h
 stderrHandle _ = error "expected stderrHandle"
-ioHandles :: (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> (Handle, Handle)
-ioHandles (Just hin, Just hout, _, _) = (hin, hout)
-ioHandles _ = error "expected ioHandles"
-oeHandles :: (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> (Handle, Handle)
-oeHandles (_, Just hout, Just herr, _) = (hout, herr)
-oeHandles _ = error "expected oeHandles"
 
 processHandle :: (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> ProcessHandle
 processHandle (_, _, _, pid) = pid
@@ -298,15 +174,24 @@ startInteractiveProcess cmd args environ = do
 -- | Wrapper around 'System.Process.createProcess' that does debug logging.
 createProcess :: CreateProcess -> IO (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle)
 createProcess p = do
-	debugProcess p
-	Utility.Process.Shim.createProcess p
+	r@(_, _, _, h) <- Utility.Process.Shim.createProcess p
+	debugProcess p h
+	return r
+
+-- | Wrapper around 'System.Process.withCreateProcess' that does debug logging.
+withCreateProcess :: CreateProcess -> (Maybe Handle -> Maybe Handle -> Maybe Handle -> ProcessHandle -> IO a) -> IO a
+withCreateProcess p action = bracket (createProcess p) cleanupProcess
+	(\(m_in, m_out, m_err, ph) -> action m_in m_out m_err ph)
 
 -- | Debugging trace for a CreateProcess.
-debugProcess :: CreateProcess -> IO ()
-debugProcess p = debugM "Utility.Process" $ unwords
-	[ action ++ ":"
-	, showCmd p
-	]
+debugProcess :: CreateProcess -> ProcessHandle -> IO ()
+debugProcess p h = do
+	pid <- getPid h
+	debugM "Utility.Process" $ unwords
+		[ describePid pid
+		, action ++ ":"
+		, showCmd p
+		]
   where
 	action
 		| piped (std_in p) && piped (std_out p) = "chat"
@@ -316,9 +201,121 @@ debugProcess p = debugM "Utility.Process" $ unwords
 	piped Inherit = False
 	piped _ = True
 
+describePid :: Maybe Utility.Process.Shim.Pid -> String
+describePid Nothing = "process"
+describePid (Just p) = "process [" ++  show p ++ "]"
+
 -- | Wrapper around 'System.Process.waitForProcess' that does debug logging.
 waitForProcess ::  ProcessHandle -> IO ExitCode
 waitForProcess h = do
+	-- Have to get pid before waiting, which closes the ProcessHandle.
+	pid <- getPid h
 	r <- Utility.Process.Shim.waitForProcess h
-	debugM "Utility.Process" ("process done " ++ show r)
+	debugM "Utility.Process" (describePid pid ++ " done " ++ show r)
 	return r
+
+cleanupProcess :: (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> IO () 
+#if MIN_VERSION_process(1,6,4)
+cleanupProcess = Utility.Process.Shim.cleanupProcess
+#else
+cleanupProcess (mb_stdin, mb_stdout, mb_stderr, pid) = do
+	-- Unlike the real cleanupProcess, this does not wait
+	-- for the process to finish in the background, so if
+	-- the process ignores SIGTERM, this can block until the process
+	-- gets around the exiting.
+	terminateProcess pid
+	let void _ = return ()
+	maybe (return ()) (void . tryNonAsync . hClose) mb_stdin
+	maybe (return ()) hClose mb_stdout
+	maybe (return ()) hClose mb_stderr
+	void $ waitForProcess pid
+#endif
+
+{- | Like hGetLine, reads a line from the Handle. Returns Nothing if end of
+ - file is reached, or the handle is closed, or if the process has exited
+ - and there is nothing more buffered to read from the handle.
+ -
+ - This is useful to protect against situations where the process might
+ - have transferred the handle being read to another process, and so
+ - the handle could remain open after the process has exited. That is a rare
+ - situation, but can happen. Consider a the process that started up a
+ - daemon, and the daemon inherited stderr from it, rather than the more
+ - usual behavior of closing the file descriptor. Reading from stderr
+ - would block past the exit of the process.
+ -
+ - In that situation, this will detect when the process has exited,
+ - and avoid blocking forever. But will still return anything the process
+ - buffered to the handle before exiting.
+ -
+ - Note on newline mode: This ignores whatever newline mode is configured
+ - for the handle, because there is no way to query that. On Windows,
+ - it will remove any \r coming before the \n. On other platforms,
+ - it does not treat \r specially.
+ -}
+hGetLineUntilExitOrEOF :: ProcessHandle -> Handle -> IO (Maybe String)
+hGetLineUntilExitOrEOF ph h = go []
+  where
+	go buf = do
+		ready <- waitforinputorerror smalldelay
+		if ready
+			then getloop buf go
+			else getProcessExitCode ph >>= \case
+				-- Process still running, wait longer.
+				Nothing -> go buf
+				-- Process is done. It's possible
+				-- that it output something and exited
+				-- since the prior hWaitForInput,
+				-- so check one more time for any buffered
+				-- output.
+				Just _ -> finalcheck buf
+
+	finalcheck buf = do
+		ready <- waitforinputorerror 0
+		if ready
+			then getloop buf finalcheck
+			-- No remaining buffered input, though the handle
+			-- may not be EOF if something else is keeping it
+			-- open. Treated the same as EOF.
+			else eofwithnolineend buf
+
+	-- On exception, proceed as if there was input;
+	-- EOF and any encoding issues are dealt with
+	-- when reading from the handle.
+	waitforinputorerror t = hWaitForInput h t
+		`catchNonAsync` const (pure True)
+
+	getchar = 
+		catcherr EOF $
+			-- If the handle is closed, reading from it is
+			-- an IllegalOperation.
+			catcherr IllegalOperation $
+				Just <$> hGetChar h
+	  where
+		catcherr t = catchIOErrorType t (const (pure Nothing))
+
+	getloop buf cont =
+		getchar >>= \case
+			Just c
+				| c == '\n' -> return (Just (gotline buf))
+				| otherwise -> cont (c:buf)
+			Nothing -> eofwithnolineend buf
+
+#ifndef mingw32_HOST_OS
+	gotline buf = reverse buf
+#else
+	gotline ('\r':buf) = reverse buf
+	gotline buf = reverse buf
+#endif
+
+	eofwithnolineend buf = return $
+		if null buf 
+			then Nothing -- no line read
+			else Just (reverse buf)
+
+	-- Tenth of a second delay. If the process exits with the FD being
+	-- held open, will wait up to twice this long before returning.
+	-- This delay could be made smaller. However, that is an unusual
+	-- case, and making it too small would cause lots of wakeups while
+	-- waiting for output. Bearing in mind that this could be run on
+	-- many processes at the same time.
+	smalldelay = 100 -- milliseconds

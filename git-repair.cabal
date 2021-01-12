@@ -28,7 +28,7 @@ Extra-Source-Files:
 custom-setup
   Setup-Depends: base (>= 4.11.1.0 && < 5.0), 
     hslogger, split, unix-compat, process, unix, filepath,
-    filepath-bytestring (>= 1.4.2.1.1),
+    filepath-bytestring (>= 1.4.2.1.1), async,
     exceptions, bytestring, directory, IfElse, data-default,
     mtl, Cabal
 
@@ -94,6 +94,7 @@ Executable git-repair
     Utility.Data
     Utility.DataUnits
     Utility.Directory
+    Utility.Directory.Create
     Utility.DottedVersion
     Utility.Env
     Utility.Env.Basic
@@ -109,8 +110,10 @@ Executable git-repair
     Utility.Metered
     Utility.Misc
     Utility.Monad
+    Utility.MoveFile
     Utility.PartialPrelude
     Utility.Path
+    Utility.Path.AbsRel
     Utility.Percentage
     Utility.Process
     Utility.Process.Shim
@@ -118,6 +121,7 @@ Executable git-repair
     Utility.RawFilePath
     Utility.Rsync
     Utility.SafeCommand
+    Utility.SimpleProtocol
     Utility.Split
     Utility.SystemDirectory
     Utility.ThreadScheduler
