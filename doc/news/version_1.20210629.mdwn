@@ -1,0 +1,5 @@
+git-repair 1.20210629 released with [[!toggle text="these changes"]]
+[[!toggleable text="""  * Fixed bug that interrupting the program while it was fixing repository
+    corruption would lose objects that were contained in pack files.
+  * Fix reversion in version 1.20200504 that prevented fetching
+    missing objects from remotes."""]]
