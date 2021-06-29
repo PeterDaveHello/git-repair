@@ -1,6 +1,6 @@
 {- git repository urls
  -
- - Copyright 2010, 2011 Joey Hess <id@joeyh.name>
+ - Copyright 2010-2021 Joey Hess <id@joeyh.name>
  -
  - Licensed under the GNU AGPL version 3 or higher.
  -}
@@ -18,12 +18,11 @@ import Network.URI hiding (scheme, authority, path)
 
 import Common
 import Git.Types
-import Git
 
 {- Scheme of an URL repo. -}
-scheme :: Repo -> String
-scheme Repo { location = Url u } = uriScheme u
-scheme repo = notUrl repo
+scheme :: Repo -> Maybe String
+scheme Repo { location = Url u } = Just (uriScheme u)
+scheme _ = Nothing
 
 {- Work around a bug in the real uriRegName
  - <http://trac.haskell.org/network/ticket/40> -}
@@ -65,13 +64,9 @@ authority = authpart assemble
 {- Applies a function to extract part of the uriAuthority of an URL repo. -}
 authpart :: (URIAuth -> a) -> Repo -> Maybe a
 authpart a Repo { location = Url u } = a <$> uriAuthority u
-authpart _ repo = notUrl repo
+authpart _ _ = Nothing
 
 {- Path part of an URL repo. -}
-path :: Repo -> FilePath
-path Repo { location = Url u } = uriPath u
-path repo = notUrl repo
-
-notUrl :: Repo -> a
-notUrl repo = error $
-	"acting on local git repo " ++ repoDescribe repo ++ " not supported"
+path :: Repo -> Maybe FilePath
+path Repo { location = Url u } = Just (uriPath u)
+path _ = Nothing

@@ -1,3 +1,12 @@
+git-repair (1.20210112) UNRELEASED; urgency=medium
+
+  * Fixed bug that interrupting the program while it was fixing repository
+    corruption would lose objects that were contained in pack files.
+  * Fix reversion in version 1.20200504 that prevented fetching
+    missing objects from remotes.
+
+ -- Joey Hess <id@joeyh.name>  Tue, 29 Jun 2021 13:15:59 -0400
+
 git-repair (1.20210111) unstable; urgency=medium
 
   * Improve output to not give the impression it's stalled running fsck

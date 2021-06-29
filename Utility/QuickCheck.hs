@@ -12,8 +12,7 @@ module Utility.QuickCheck
 	( module X
 	, TestableString
 	, fromTestableString
-	, TestableFilePath
-	, fromTestableFilePath
+	, TestableFilePath(..)
 	, nonNegative
 	, positive
 	) where

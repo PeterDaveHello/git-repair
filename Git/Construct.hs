@@ -1,6 +1,6 @@
 {- Construction of Git Repo objects
  -
- - Copyright 2010-2020 Joey Hess <id@joeyh.name>
+ - Copyright 2010-2021 Joey Hess <id@joeyh.name>
  -
  - Licensed under the GNU AGPL version 3 or higher.
  -}
@@ -57,54 +57,58 @@ fromCwd = getCurrentDirectory >>= seekUp
 
 {- Local Repo constructor, accepts a relative or absolute path. -}
 fromPath :: RawFilePath -> IO Repo
-fromPath dir = fromAbsPath =<< absPath dir
+fromPath dir
+	-- When dir == "foo/.git", git looks for "foo/.git/.git",
+	-- and failing that, uses "foo" as the repository.
+	| (P.pathSeparator `B.cons` ".git") `B.isSuffixOf` canondir =
+		ifM (doesDirectoryExist $ fromRawFilePath dir </> ".git")
+			( ret dir
+			, ret (P.takeDirectory canondir)
+			)
+	| otherwise = ifM (doesDirectoryExist (fromRawFilePath dir))
+		( checkGitDirFile dir >>= maybe (ret dir) (pure . newFrom)
+		-- git falls back to dir.git when dir doesn't
+		-- exist, as long as dir didn't end with a
+		-- path separator
+		, if dir == canondir
+			then ret (dir <> ".git")
+			else ret dir
+		)
+  where
+	ret = pure . newFrom . LocalUnknown
+	canondir = P.dropTrailingPathSeparator dir
 
 {- Local Repo constructor, requires an absolute path to the repo be
  - specified. -}
 fromAbsPath :: RawFilePath -> IO Repo
 fromAbsPath dir
-	| absoluteGitPath dir = hunt
+	| absoluteGitPath dir = fromPath dir
 	| otherwise =
 		error $ "internal error, " ++ show dir ++ " is not absolute"
-  where
-	ret = pure . newFrom . LocalUnknown
-	canondir = P.dropTrailingPathSeparator dir
-	{- When dir == "foo/.git", git looks for "foo/.git/.git",
-	 - and failing that, uses "foo" as the repository. -}
-	hunt
-		| (P.pathSeparator `B.cons` ".git") `B.isSuffixOf` canondir =
-			ifM (doesDirectoryExist $ fromRawFilePath dir </> ".git")
-				( ret dir
-				, ret (P.takeDirectory canondir)
-				)
-		| otherwise = ifM (doesDirectoryExist (fromRawFilePath dir))
-			( checkGitDirFile dir >>= maybe (ret dir) (pure . newFrom)
-			-- git falls back to dir.git when dir doesn't
-			-- exist, as long as dir didn't end with a
-			-- path separator
-			, if dir == canondir
-				then ret (dir <> ".git")
-				else ret dir
-			)
 
-{- Remote Repo constructor. Throws exception on invalid url.
+{- Construct a Repo for a remote's url.
  -
  - Git is somewhat forgiving about urls to repositories, allowing
- - eg spaces that are not normally allowed unescaped in urls.
+ - eg spaces that are not normally allowed unescaped in urls. Such
+ - characters get escaped.
+ -
+ - This will always succeed, even if the url cannot be parsed
+ - or is invalid, because git can also function despite remotes having
+ - such urls, only failing if such a remote is used.
  -}
 fromUrl :: String -> IO Repo
 fromUrl url
-	| not (isURI url) = fromUrlStrict $ escapeURIString isUnescapedInURI url
-	| otherwise = fromUrlStrict url
+	| not (isURI url) = fromUrl' $ escapeURIString isUnescapedInURI url
+	| otherwise = fromUrl' url
 
-fromUrlStrict :: String -> IO Repo
-fromUrlStrict url
-	| "file://" `isPrefixOf` url = fromAbsPath $ toRawFilePath $
-		unEscapeString $ uriPath u
-	| otherwise = pure $ newFrom $ Url u
-  where
-	u = fromMaybe bad $ parseURI url
-	bad = error $ "bad url " ++ url
+fromUrl' :: String -> IO Repo
+fromUrl' url
+	| "file://" `isPrefixOf` url = case parseURI url of
+		Just u -> fromAbsPath $ toRawFilePath $ unEscapeString $ uriPath u
+		Nothing -> pure $ newFrom $ UnparseableUrl url
+	| otherwise = case parseURI url of
+		Just u -> pure $ newFrom $ Url u
+		Nothing -> pure $ newFrom $ UnparseableUrl url
 
 {- Creates a repo that has an unknown location. -}
 fromUnknown :: Repo
@@ -116,24 +120,24 @@ localToUrl :: Repo -> Repo -> Repo
 localToUrl reference r
 	| not $ repoIsUrl reference = error "internal error; reference repo not url"
 	| repoIsUrl r = r
-	| otherwise = case Url.authority reference of
-		Nothing -> r
-		Just auth -> 
+	| otherwise = case (Url.authority reference, Url.scheme reference) of
+		(Just auth, Just s) -> 
 			let absurl = concat
-				[ Url.scheme reference
+				[ s
 				, "//"
 				, auth
 				, fromRawFilePath (repoPath r)
 				]
 			in r { location = Url $ fromJust $ parseURI absurl }
+		_ -> r
 
 {- Calculates a list of a repo's configured remotes, by parsing its config. -}
 fromRemotes :: Repo -> IO [Repo]
-fromRemotes repo = mapM construct remotepairs
+fromRemotes repo = catMaybes <$> mapM construct remotepairs
   where
 	filterconfig f = filter f $ M.toList $ config repo
 	filterkeys f = filterconfig (\(k,_) -> f k)
-	remotepairs = filterkeys isRemoteKey
+	remotepairs = filterkeys isRemoteUrlKey
 	construct (k,v) = remoteNamedFromKey k $
 		fromRemoteLocation (fromConfigValue v) repo
 
@@ -145,8 +149,10 @@ remoteNamed n constructor = do
 
 {- Sets the name of a remote based on the git config key, such as
  - "remote.foo.url". -}
-remoteNamedFromKey :: ConfigKey -> IO Repo -> IO Repo
-remoteNamedFromKey = remoteNamed . remoteKeyToRemoteName
+remoteNamedFromKey :: ConfigKey -> IO Repo -> IO (Maybe Repo)
+remoteNamedFromKey k r = case remoteKeyToRemoteName k of
+	Nothing -> pure Nothing
+	Just n -> Just <$> remoteNamed n r
 
 {- Constructs a new Repo for one of a Repo's remotes using a given
  - location (ie, an url). -}
@@ -187,6 +193,7 @@ expandTilde = expandt True
 	expandt True ('~':'/':cs) = do
 		h <- myHomeDir
 		return $ h </> cs
+	expandt True "~" = myHomeDir
 	expandt True ('~':cs) = do
 		let (name, rest) = findname "" cs
 		u <- getUserEntryForName name

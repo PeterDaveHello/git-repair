@@ -1,6 +1,6 @@
 {- git branch stuff
  -
- - Copyright 2011 Joey Hess <id@joeyh.name>
+ - Copyright 2011-2021 Joey Hess <id@joeyh.name>
  -
  - Licensed under the GNU AGPL version 3 or higher.
  -}
@@ -166,7 +166,7 @@ commitCommand' runner commitmode ps = runner $
  -}
 commit :: CommitMode -> Bool -> String -> Branch -> [Ref] -> Repo -> IO (Maybe Sha)
 commit commitmode allowempty message branch parentrefs repo = do
-	tree <- getSha "write-tree" $ pipeReadStrict [Param "write-tree"] repo
+	tree <- writeTree repo
 	ifM (cancommit tree)
 		( do
 			sha <- commitTree commitmode message parentrefs tree repo
@@ -184,6 +184,19 @@ commit commitmode allowempty message branch parentrefs repo = do
 commitAlways :: CommitMode -> String -> Branch -> [Ref] -> Repo -> IO Sha
 commitAlways commitmode message branch parentrefs repo = fromJust
 	<$> commit commitmode True message branch parentrefs repo
+
+-- Throws exception if the index is locked, with an error message output by
+-- git on stderr.
+writeTree :: Repo -> IO Sha
+writeTree repo = getSha "write-tree" $
+	pipeReadStrict [Param "write-tree"] repo
+
+-- Avoids error output if the command fails due to eg, the index being locked.
+writeTreeQuiet :: Repo -> IO (Maybe Sha)
+writeTreeQuiet repo = extractSha <$> withNullHandle go
+  where
+	go nullh = pipeReadStrict' (\p -> p { std_err = UseHandle nullh }) 
+		[Param "write-tree"] repo
 
 commitTree :: CommitMode -> String -> [Ref] -> Ref -> Repo -> IO Sha
 commitTree commitmode message parentrefs tree repo =
