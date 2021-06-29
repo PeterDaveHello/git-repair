@@ -1,11 +1,11 @@
 Name: git-repair
-Version: 1.20210111
+Version: 1.20210629
 Cabal-Version: >= 1.10
 License: AGPL-3
 Maintainer: Joey Hess <joey@kitenet.net>
 Author: Joey Hess
 Stability: Stable
-Copyright: 2013-2020 Joey Hess
+Copyright: 2013-2021 Joey Hess
 License-File: COPYRIGHT
 Build-Type: Custom
 Homepage: http://git-repair.branchable.com/
