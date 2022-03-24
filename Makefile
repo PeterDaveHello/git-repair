@@ -38,6 +38,6 @@ clean:
 	find . -name \*.hi -exec rm {} \;
 
 tags:
-	hasktags . || true
+	hasktags . -c || true
 
 .PHONY: tags
