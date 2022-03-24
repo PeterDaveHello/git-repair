@@ -15,7 +15,7 @@ build: Build/SysConfig.hs
 			ln -sf dist/build/git-repair/git-repair git-repair; \
 		fi; \
 	fi
-	@$(MAKE) tags >/dev/null 2>&1 &
+	@$(MAKE) tags
 
 Build/SysConfig.hs: Build/TestConfig.hs Build/Configure.hs
 	if [ "$(BUILDER)" = ./Setup ]; then ghc --make Setup; fi
@@ -37,22 +37,7 @@ clean:
 	find . -name \*.o -exec rm {} \;
 	find . -name \*.hi -exec rm {} \;
 
-# tags file for vim
 tags:
-	@$(MAKE) --quiet hothasktags HOTHASKTAGS_OPT= TAGFILE=tags
-
-# TAGS file for emacs
-TAGS:
-	@$(MAKE) --quiet hothasktags HOTHASKTAGS_OPT=-e TAGFILE=TAGS
-
-# https://github.com/luqui/hothasktags/issues/18
-HOTHASKTAGS_ARGS=-XLambdaCase -XPackageImports --cpp
-
-hothasktags:
-	@if ! cabal exec hothasktags -- $(HOTHASKTAGS_OPT) $(HOTHASKTAGS_ARGS) \
-		$$(find . | grep -v /.git/ | grep -v /tmp/ | grep -v dist/ | grep -v /doc/ | egrep '\.hs$$') 2>/dev/null \
-		| sort > $(TAGFILE); then \
-		echo "** hothasktags failed"; \
-	fi
+	hasktags . || true
 
 .PHONY: tags
