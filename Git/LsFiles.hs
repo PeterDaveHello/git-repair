@@ -5,6 +5,8 @@
  - Licensed under the GNU AGPL version 3 or higher.
  -}
 
+{-# LANGUAGE OverloadedStrings #-}
+
 module Git.LsFiles (
 	Options(..),
 	inRepo,
@@ -66,7 +68,7 @@ safeForLsFiles r = isNothing (remoteName r)
 guardSafeForLsFiles :: Repo -> IO a -> IO a
 guardSafeForLsFiles r a
 	| safeForLsFiles r = a
-	| otherwise = error $ "git ls-files is unsafe to run on repository " ++ repoDescribe r
+	| otherwise = giveup $ "git ls-files is unsafe to run on repository " ++ repoDescribe r
 
 data Options = ErrorUnmatch
 
@@ -236,7 +238,14 @@ data Unmerged = Unmerged
 	{ unmergedFile :: RawFilePath
 	, unmergedTreeItemType :: Conflicting TreeItemType
 	, unmergedSha :: Conflicting Sha
-	}
+	, unmergedSiblingFile :: Maybe RawFilePath
+	-- ^ Normally this is Nothing, because a
+	-- merge conflict is represented as a single file with two
+	-- stages. However, git resolvers sometimes choose to stage
+	-- two files, one for each side of the merge conflict. In such a case,
+	-- this is used for the name of the second file, which is related
+	-- to the first file. (Eg, "foo" and "foo~ref")
+	} deriving (Show)
 
 {- Returns a list of the files in the specified locations that have
  - unresolved merge conflicts.
@@ -246,12 +255,12 @@ data Unmerged = Unmerged
  -   1 = old version, can be ignored
  -   2 = us
  -   3 = them
- - If a line is omitted, that side removed the file.
+ - If line 2 or 3 is omitted, that side removed the file.
  -}
 unmerged :: [RawFilePath] -> Repo -> IO ([Unmerged], IO Bool)
 unmerged l repo = guardSafeForLsFiles repo $ do
 	(fs, cleanup) <- pipeNullSplit params repo
-	return (reduceUnmerged [] $ catMaybes $ map (parseUnmerged . decodeBL') fs, cleanup)
+	return (reduceUnmerged [] $ catMaybes $ map (parseUnmerged . decodeBL) fs, cleanup)
   where
 	params = 
 		Param "ls-files" :
@@ -265,7 +274,7 @@ data InternalUnmerged = InternalUnmerged
 	, ifile :: RawFilePath
 	, itreeitemtype :: Maybe TreeItemType
 	, isha :: Maybe Sha
-	}
+	} deriving (Show)
 
 parseUnmerged :: String -> Maybe InternalUnmerged
 parseUnmerged s
@@ -277,7 +286,7 @@ parseUnmerged s
 				then Nothing
 				else do
 					treeitemtype <- readTreeItemType (encodeBS rawtreeitemtype)
-					sha <- extractSha (encodeBS' rawsha)
+					sha <- extractSha (encodeBS rawsha)
 					return $ InternalUnmerged (stage == 2) (toRawFilePath file)
 						(Just treeitemtype) (Just sha)
 		_ -> Nothing
@@ -296,16 +305,25 @@ reduceUnmerged c (i:is) = reduceUnmerged (new:c) rest
 		{ unmergedFile = ifile i
 		, unmergedTreeItemType = Conflicting treeitemtypeA treeitemtypeB
 		, unmergedSha = Conflicting shaA shaB
+		, unmergedSiblingFile = if ifile sibi == ifile i
+			then Nothing
+			else Just (ifile sibi)
 		}
 	findsib templatei [] = ([], removed templatei)
 	findsib templatei (l:ls)
-		| ifile l == ifile templatei = (ls, l)
+		| ifile l == ifile templatei || issibfile templatei l = (ls, l)
 		| otherwise = (l:ls, removed templatei)
 	removed templatei = templatei
 		{ isus = not (isus templatei)
 		, itreeitemtype = Nothing
 		, isha = Nothing
 		}
+	-- foo~<ref> are unmerged sibling files of foo
+	-- Some versions or resolvers of git stage the sibling files,
+	-- other versions or resolvers do not.
+	issibfile x y = (ifile x <> "~") `S.isPrefixOf` ifile y
+		&& isus x || isus y
+		&& not (isus x && isus y)
 
 {- Gets the InodeCache equivilant information stored in the git index.
  -

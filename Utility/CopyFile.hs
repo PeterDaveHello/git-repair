@@ -1,6 +1,6 @@
 {- file copying
  -
- - Copyright 2010-2019 Joey Hess <id@joeyh.name>
+ - Copyright 2010-2021 Joey Hess <id@joeyh.name>
  -
  - License: BSD-2-clause
  -}
@@ -30,6 +30,12 @@ copyMetaDataParams meta = map snd $ filter fst
 		, Param "-p")
 	, (not allmeta && BuildInfo.cp_preserve_timestamps
 		, Param "--preserve=timestamps")
+	-- cp -a may preserve xattrs that have special meaning,
+	-- eg to NFS, and have even been observed to prevent later
+	-- changing the permissions of the file. So prevent preserving
+	-- xattrs.
+	, (allmeta && BuildInfo.cp_a && BuildInfo.cp_no_preserve_xattr_supported
+		, Param "--no-preserve=xattr")
 	]
   where
 	allmeta = meta == CopyAllMetaData
@@ -50,11 +56,17 @@ copyFileExternal meta src dest = do
 		| otherwise = copyMetaDataParams meta
 
 {- When a filesystem supports CoW (and cp does), uses it to make
- - an efficient copy of a file. Otherwise, returns False. -}
+ - an efficient copy of a file. Otherwise, returns False.
+ -
+ - The dest file must not exist yet, or it will fail to make a CoW copy,
+ - and will return False.
+ -
+ - Note that in coreutil 9.0, cp uses CoW by default, without needing an
+ - option. This code is only needed to support older versions.
+ -}
 copyCoW :: CopyMetaData -> FilePath -> FilePath -> IO Bool
 copyCoW meta src dest
 	| BuildInfo.cp_reflink_supported = do
-		void $ tryIO $ removeFile dest
 		-- When CoW is not supported, cp will complain to stderr,
 		-- so have to discard its stderr.
 		ok <- catchBoolIO $ withNullHandle $ \nullh ->

@@ -95,12 +95,48 @@ upFrom dir
 dirContains :: RawFilePath -> RawFilePath -> Bool
 dirContains a b = a == b
 	|| a' == b'
-	|| (addTrailingPathSeparator a') `B.isPrefixOf` b'
-	|| a' == "." && normalise ("." </> b') == b'
+	|| (a'' `B.isPrefixOf` b' && avoiddotdotb)
+	|| a' == "." && normalise ("." </> b') == b' && nodotdot b'
+	|| dotdotcontains
   where
 	a' = norm a
+	a'' = addTrailingPathSeparator a'
 	b' = norm b
 	norm = normalise . simplifyPath
+
+	{- This handles the case where a is ".." and b is "../..",
+	 - which is not inside a. Similarly, "../.." does not contain
+	 - "../../../". Due to the use of norm, cases like 
+	 - "../../foo/../../" get converted to eg "../../.." and
+	 - so do not need to be handled specially here.
+	 -
+	 - When this is called, we already know that 
+	 - a'' is a prefix of b', so all that needs to be done is drop
+	 - that prefix, and check if the next path component is ".."
+	 -}
+	avoiddotdotb = nodotdot $ B.drop (B.length a'') b'
+
+	nodotdot p = all (not . isdotdot) (splitPath p)
+	
+	isdotdot s = dropTrailingPathSeparator s == ".."
+
+	{- This handles the case where a is ".." or "../.." etc,
+	 - and b is "foo" or "../foo" etc. The rule is that when
+	 - a is entirely ".." components, b is under it when it starts
+	 - with fewer ".." components. 
+	 - 
+	 - Due to the use of norm, cases like "../../foo/../../" get
+	 - converted to eg "../../../" and so do not need to be handled
+	 - specially here.
+	 -}
+	dotdotcontains
+		| isAbsolute b' = False
+		| otherwise = 
+			let aps = splitPath a'
+			    bps = splitPath b'
+			in if all isdotdot aps
+				then length (takeWhile isdotdot bps) < length aps
+				else False
 
 {- Given an original list of paths, and an expanded list derived from it,
  - which may be arbitrarily reordered, generates a list of lists, where
@@ -187,7 +223,13 @@ relPathDirToFileAbs from to
 	dotdots = replicate (length pfrom - numcommon) ".."
 	numcommon = length common
 #ifdef mingw32_HOST_OS
-	normdrive = map toLower . takeWhile (/= ':') . fromRawFilePath . takeDrive
+	normdrive = map toLower
+		-- Get just the drive letter, removing any leading
+		-- path separator, which takeDrive leaves on the drive
+		-- letter.
+		. dropWhileEnd (isPathSeparator . fromIntegral . ord)
+		. fromRawFilePath 
+		. takeDrive
 #endif
 
 {- Checks if a command is available in PATH.

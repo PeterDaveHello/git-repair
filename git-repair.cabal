@@ -1,11 +1,11 @@
 Name: git-repair
-Version: 1.20210629
+Version: 1.20220404
 Cabal-Version: >= 1.10
 License: AGPL-3
 Maintainer: Joey Hess <joey@kitenet.net>
 Author: Joey Hess
 Stability: Stable
-Copyright: 2013-2021 Joey Hess
+Copyright: 2013-2022 Joey Hess
 License-File: COPYRIGHT
 Build-Type: Custom
 Homepage: http://git-repair.branchable.com/
@@ -26,9 +26,9 @@ Extra-Source-Files:
   git-repair.1
 
 custom-setup
-  Setup-Depends: base (>= 4.11.1.0 && < 5.0), 
+  Setup-Depends: base (>= 4.11.1.0), 
     hslogger, split, unix-compat, process, unix, filepath,
-    filepath-bytestring (>= 1.4.2.1.1), async,
+    filepath-bytestring (>= 1.4.2.1.4), async,
     exceptions, bytestring, directory, IfElse, data-default,
     mtl, Cabal, time
 
@@ -43,11 +43,11 @@ Executable git-repair
   Default-Extensions: LambdaCase
   Build-Depends: split, hslogger, directory, filepath, containers, mtl,
    unix-compat (>= 0.5), bytestring, exceptions (>= 0.6), transformers,
-   base (>= 4.11.1.0 && < 5.0), IfElse, text, process, time, QuickCheck,
+   base (>= 4.11.1.0), IfElse, text, process, time, QuickCheck,
    utf8-string, async, optparse-applicative (>= 0.14.1),
    data-default, deepseq, attoparsec,
    network-uri (>= 2.6), network (>= 2.6),
-   filepath-bytestring (>= 1.4.2.1.0),
+   filepath-bytestring (>= 1.4.2.1.4),
    time
 
   if (os(windows))

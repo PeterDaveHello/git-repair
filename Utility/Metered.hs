@@ -37,6 +37,7 @@ module Utility.Metered (
 	demeterCommandEnv,
 	avoidProgress,
 	rateLimitMeterUpdate,
+	bwLimitMeterUpdate,
 	Meter,
 	mkMeter,
 	setMeterTotalSize,
@@ -51,6 +52,7 @@ import Utility.Percentage
 import Utility.DataUnits
 import Utility.HumanTime
 import Utility.SimpleProtocol as Proto
+import Utility.ThreadScheduler
 
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString as S
@@ -380,6 +382,46 @@ rateLimitMeterUpdate delta (Meter totalsizev _ _ _) meterupdate = do
 					meterupdate n
 				else putMVar lastupdate prev
 
+-- | Bandwidth limiting by inserting a delay at the point that a meter is
+-- updated.
+--
+-- This will only work when the actions that use bandwidth are run in the
+-- same process and thread as the call to the MeterUpdate.
+--
+-- For example, if the desired bandwidth is 100kb/s, and over the past
+-- 1/10th of a second, 30kb was sent, then the current bandwidth is
+-- 300kb/s, 3x as fast as desired. So, after getting the next chunk,
+-- pause for twice as long as it took to get it.
+bwLimitMeterUpdate :: ByteSize -> Duration -> MeterUpdate -> IO MeterUpdate
+bwLimitMeterUpdate bwlimit duration meterupdate
+	| bwlimit <= 0 = return meterupdate
+	| otherwise = do
+		nowtime <- getPOSIXTime
+		mv <- newMVar (nowtime, Nothing)
+		return (mu mv)
+  where
+	mu mv n@(BytesProcessed i) = do
+		endtime <- getPOSIXTime
+		(starttime, mprevi) <- takeMVar mv
+
+		case mprevi of
+			Just previ -> do
+				let runtime = endtime - starttime
+				let currbw = fromIntegral (i - previ) / runtime
+				let pausescale = if currbw > bwlimit'
+					then (currbw / bwlimit') - 1
+					else 0
+				unboundDelay (floor (runtime * pausescale * msecs))
+			Nothing -> return ()
+
+		meterupdate n
+
+		nowtime <- getPOSIXTime
+		putMVar mv (nowtime, Just i)
+
+	bwlimit' = fromIntegral (bwlimit * durationSeconds duration) 
+	msecs = fromIntegral oneSecond
+
 data Meter = Meter (MVar (Maybe TotalSize)) (MVar MeterState) (MVar String) DisplayMeter
 
 data MeterState = MeterState
@@ -417,12 +459,14 @@ updateMeter (Meter totalsizev sv bv displaymeter) new = do
 -- | Display meter to a Handle.
 displayMeterHandle :: Handle -> RenderMeter -> DisplayMeter
 displayMeterHandle h rendermeter v msize old new = do
+	olds <- takeMVar v
 	let s = rendermeter msize old new
-	olds <- swapMVar v s
+	let padding = replicate (length olds - length s) ' '
+	let s' = s <> padding
+	putMVar v s'
 	-- Avoid writing when the rendered meter has not changed.
-	when (olds /= s) $ do
-		let padding = replicate (length olds - length s) ' '
-		hPutStr h ('\r':s ++ padding)
+	when (olds /= s') $ do
+		hPutStr h ('\r':s')
 		hFlush h
 
 -- | Clear meter displayed by displayMeterHandle. May be called before
