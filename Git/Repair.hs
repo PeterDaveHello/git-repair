@@ -114,7 +114,7 @@ retrieveMissingObjects missing referencerepo r
 	| not (foundBroken missing) = return missing
 	| otherwise = withTmpDir "tmprepo" $ \tmpdir -> do
 		unlessM (boolSystem "git" [Param "init", File tmpdir]) $
-			error $ "failed to create temp repository in " ++ tmpdir
+			giveup $ "failed to create temp repository in " ++ tmpdir
 		tmpr <- Config.read =<< Construct.fromPath (toRawFilePath tmpdir)
 		let repoconfig r' = fromRawFilePath (localGitDir r' P.</> "config")
 		whenM (doesFileExist (repoconfig r)) $
@@ -252,7 +252,7 @@ getAllRefs r = getAllRefs' (fromRawFilePath (localGitDir r) </> "refs")
 getAllRefs' :: FilePath -> IO [Ref]
 getAllRefs' refdir = do
 	let topsegs = length (splitPath refdir) - 1
-	let toref = Ref . encodeBS' . joinPath . drop topsegs . splitPath
+	let toref = Ref . encodeBS . joinPath . drop topsegs . splitPath
 	map toref <$> dirContentsRecursive refdir
 
 explodePackedRefsFile :: Repo -> IO ()
@@ -279,8 +279,8 @@ packedRefsFile r = fromRawFilePath (localGitDir r) </> "packed-refs"
 parsePacked :: String -> Maybe (Sha, Ref)
 parsePacked l = case words l of
 	(sha:ref:[])
-		| isJust (extractSha (encodeBS' sha)) && Ref.legal True ref ->
-			Just (Ref (encodeBS' sha), Ref (encodeBS' ref))
+		| isJust (extractSha (encodeBS sha)) && Ref.legal True ref ->
+			Just (Ref (encodeBS sha), Ref (encodeBS ref))
 	_ -> Nothing
 
 {- git-branch -d cannot be used to remove a branch that is directly
@@ -325,7 +325,11 @@ findUncorruptedCommit missing goodcommits branch r = do
  - the commit. Also adds to a set of commit shas that have been verified to
  - be good, which can be passed into subsequent calls to avoid
  - redundant work when eg, chasing down branches to find the first
- - uncorrupted commit. -}
+ - uncorrupted commit.
+ -
+ - When the sha is not a commit but some other git object, returns
+ - true, but does not add it to the set.
+ -}
 verifyCommit :: MissingObjects -> GoodCommits -> Sha -> Repo -> IO (Bool, GoodCommits)
 verifyCommit missing goodcommits commit r
 	| checkGoodCommit commit goodcommits = return (True, goodcommits)
@@ -337,21 +341,28 @@ verifyCommit missing goodcommits commit r
 			, Param (fromRef commit)
 			] r
 		let committrees = map (parse . decodeBL) ls
-		if any isNothing committrees || null committrees
-			then do
-				void cleanup
-				return (False, goodcommits)
-			else do
-				let cts = catMaybes committrees
-				ifM (cleanup <&&> check cts)
-					( return (True, addGoodCommits (map fst cts) goodcommits)
-					, return (False, goodcommits)
-					)
+		-- git log on an object that is not a commit will
+		-- succeed without any output
+		if null committrees
+			then ifM cleanup
+				( return (True, goodcommits)
+				, return (False, goodcommits)
+				)
+			else if any isNothing committrees
+				then do
+					void cleanup
+					return (False, goodcommits)
+				else do
+					let cts = catMaybes committrees
+					ifM (cleanup <&&> check cts)
+						( return (True, addGoodCommits (map fst cts) goodcommits)
+						, return (False, goodcommits)
+						)
   where
 	parse l = case words l of
 		(commitsha:treesha:[]) -> (,)
-			<$> extractSha (encodeBS' commitsha)
-			<*> extractSha (encodeBS' treesha)
+			<$> extractSha (encodeBS commitsha)
+			<*> extractSha (encodeBS treesha)
 		_ -> Nothing
 	check [] = return True
 	check ((c, t):rest)
@@ -469,14 +480,14 @@ preRepair g = do
   where
 	headfile = localGitDir g P.</> "HEAD"
 	validhead s = "ref: refs/" `isPrefixOf` s
-		|| isJust (extractSha (encodeBS' s))
+		|| isJust (extractSha (encodeBS s))
 
 {- Put it all together. -}
 runRepair :: (Ref -> Bool) -> Bool -> Repo -> IO (Bool, [Branch])
 runRepair removablebranch forced g = do
 	preRepair g
 	putStrLn "Running git fsck ..."
-	fsckresult <- findBroken False g
+	fsckresult <- findBroken False False g
 	if foundBroken fsckresult
 		then do
 			putStrLn "Fsck found problems, attempting repair."
@@ -500,7 +511,7 @@ runRepairOf fsckresult removablebranch forced referencerepo g = do
 runRepair' :: (Ref -> Bool) -> FsckResults -> Bool -> Maybe FilePath -> Repo -> IO (Bool, [Branch])
 runRepair' removablebranch fsckresult forced referencerepo g = do
 	cleanCorruptObjects fsckresult g
-	missing <- findBroken False g
+	missing <- findBroken False False g
 	stillmissing <- retrieveMissingObjects missing referencerepo g
 	case stillmissing of
 		FsckFoundMissing s t
@@ -529,7 +540,7 @@ runRepair' removablebranch fsckresult forced referencerepo g = do
 			| forced -> ifM (pure (repoIsLocalBare g) <||> checkIndex g)
 				( do
 					cleanCorruptObjects FsckFailed g
-					stillmissing' <- findBroken False g
+					stillmissing' <- findBroken False False g
 					case stillmissing' of
 						FsckFailed -> return (False, [])
 						FsckFoundMissing s t -> forcerepair s t
@@ -575,7 +586,7 @@ runRepair' removablebranch fsckresult forced referencerepo g = do
 		-- the repair process.
 		if fscktruncated
 			then do
-				fsckresult' <- findBroken False g
+				fsckresult' <- findBroken False False g
 				case fsckresult' of
 					FsckFailed -> do
 						putStrLn "git fsck is failing"
@@ -597,7 +608,7 @@ runRepair' removablebranch fsckresult forced referencerepo g = do
 		removeWhenExistsWith R.removeLink (indexFile g)
 		-- The corrupted index can prevent fsck from finding other
 		-- problems, so re-run repair.
-		fsckresult' <- findBroken False g
+		fsckresult' <- findBroken False False g
 		result <- runRepairOf fsckresult' removablebranch forced referencerepo g
 		putStrLn "Removed the corrupted index file. You should look at what files are present in your working tree and git add them back to the index when appropriate."
 		return result

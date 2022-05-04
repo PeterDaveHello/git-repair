@@ -1,3 +1,10 @@
+git-repair (1.20210630) UNRELEASED; urgency=medium
+
+  * Avoid treating refs that are not commit objects as evidence of
+    repository corruption.
+
+ -- Joey Hess <id@joeyh.name>  Wed, 04 May 2022 11:33:48 -0400
+
 git-repair (1.20210629) unstable; urgency=medium
 
   * Fixed bug that interrupting the program while it was fixing repository
