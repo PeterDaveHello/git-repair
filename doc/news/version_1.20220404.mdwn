@@ -1,0 +1,3 @@
+git-repair 1.20220404 released with [[!toggle text="these changes"]]
+[[!toggleable text="""  * Avoid treating refs that are not commit objects as evidence of
+    repository corruption."""]]
