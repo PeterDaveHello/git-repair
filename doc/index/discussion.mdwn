@@ -1,12 +1,27 @@
-My experience with git repair:
+# Experience n°1
 
-git repair
-Running git fsck ...
-Stack space overflow: current size 8388608 bytes.
-Use `+RTS -Ksize -RTS' to increase it.
+    % git repair
+    Running git fsck ...
+    Stack space overflow: current size 8388608 bytes.
+    Use `+RTS -Ksize -RTS' to increase it.
 
-git repair +RTS -K32M -RTS
-git-repair: Most RTS options are disabled. Link with -rtsopts to enable them.
+    % git repair +RTS -K32M -RTS
+    git-repair: Most RTS options are disabled. Link with -rtsopts to enable them.
 
 Whats up guys? Are we playing catch 22 here?
 
+# Experience n°2
+
+I've been running
+
+    LANG=C TMPDIR=/mnt/1/tmp TMP=/mnt/1/tmp git-repair --force
+
+on a BUP repository for more than a wekk.  The output so far looks like:
+
+    Initialized empty Git repository in /mnt/1/tmp/tmprepo8ymhUQ/.git/
+    fatal: /mnt/1/monnier-broken.bup: '/mnt/1/monnier-broken.bup' is outside repository at '/mnt/1/monnier-broken.bup'
+    Initialized empty Git repository in /mnt/1/tmp/tmprepoz8b3XR/.git/
+    fatal: /mnt/1/monnier-broken.bup: '/mnt/1/monnier-broken.bup' is outside repository at '/mnt/1/monnier-broken.bup'
+    [...]
+
+where those two lines repeat every few hours.  Should I assume it's stuck in some kind of inf-loop, or will it actually end at some point?
