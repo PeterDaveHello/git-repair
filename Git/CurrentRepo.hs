@@ -1,6 +1,6 @@
 {- The current git repository.
  -
- - Copyright 2012-2020 Joey Hess <id@joeyh.name>
+ - Copyright 2012-2022 Joey Hess <id@joeyh.name>
  -
  - Licensed under the GNU AGPL version 3 or higher.
  -}
@@ -79,8 +79,9 @@ get = do
 			{ gitdir = absd
 			, worktree = Just curr
 			}
-		r <- Git.Config.read $ newFrom loc
-		return $ if Git.Config.isBare r
+		r <- Git.Config.read $ (newFrom loc)
+			{ gitDirSpecifiedExplicitly = True }
+		return $ if fromMaybe False (Git.Config.isBare r)
 			then r { location = (location r) { worktree = Nothing } }
 			else r
 	configure Nothing Nothing = giveup "Not in a git repository."

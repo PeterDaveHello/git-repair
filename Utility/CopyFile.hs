@@ -14,6 +14,7 @@ module Utility.CopyFile (
 
 import Common
 import qualified BuildInfo
+import qualified Utility.RawFilePath as R
 
 data CopyMetaData 
 	-- Copy timestamps when possible, but no other metadata, and
@@ -60,9 +61,6 @@ copyFileExternal meta src dest = do
  -
  - The dest file must not exist yet, or it will fail to make a CoW copy,
  - and will return False.
- -
- - Note that in coreutil 9.0, cp uses CoW by default, without needing an
- - option. This code is only needed to support older versions.
  -}
 copyCoW :: CopyMetaData -> FilePath -> FilePath -> IO Bool
 copyCoW meta src dest
@@ -82,14 +80,17 @@ copyCoW meta src dest
 		return ok
 	| otherwise = return False
   where
+ 	-- Note that in coreutils 9.0, cp uses CoW by default,
+	-- without needing an option. This s only needed to support 
+	-- older versions.
 	params = Param "--reflink=always" : copyMetaDataParams meta
 
 {- Create a hard link if the filesystem allows it, and fall back to copying
  - the file. -}
-createLinkOrCopy :: FilePath -> FilePath -> IO Bool
+createLinkOrCopy :: RawFilePath -> RawFilePath -> IO Bool
 createLinkOrCopy src dest = go `catchIO` const fallback
   where
 	go = do
-		createLink src dest
+		R.createLink src dest
 		return True
-	fallback = copyFileExternal CopyAllMetaData src dest
+	fallback = copyFileExternal CopyAllMetaData (fromRawFilePath src) (fromRawFilePath dest)

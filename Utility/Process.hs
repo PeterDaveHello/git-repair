@@ -31,6 +31,7 @@ module Utility.Process (
 	stdoutHandle,
 	stderrHandle,
 	processHandle,
+	showCmd,
 	devNull,
 ) where
 
@@ -188,11 +189,13 @@ withCreateProcess p action = bracket (createProcess p) cleanupProcess
 debugProcess :: CreateProcess -> ProcessHandle -> IO ()
 debugProcess p h = do
 	pid <- getPid h
-	debug "Utility.Process" $ unwords
+	debug "Utility.Process" $ unwords $
 		[ describePid pid
 		, action ++ ":"
 		, showCmd p
-		]
+		] ++ case cwd p of
+			Nothing -> []
+			Just c -> ["in", show c]
   where
 	action
 		| piped (std_in p) && piped (std_out p) = "chat"

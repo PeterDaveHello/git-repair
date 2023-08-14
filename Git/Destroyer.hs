@@ -18,7 +18,9 @@ import Git
 import Utility.QuickCheck
 import Utility.FileMode
 import Utility.Tmp
+import qualified Utility.RawFilePath as R
 
+import System.PosixCompat.Files
 import qualified Data.ByteString as B
 import Data.Word
 
@@ -95,12 +97,12 @@ applyDamage ds r = do
 		case d of
 			Empty s -> withfile s $ \f ->
 				withSaneMode f $ do
-					removeWhenExistsWith removeLink f
+					removeWhenExistsWith R.removeLink (toRawFilePath f)
 					writeFile f ""
 			Reverse s -> withfile s $ \f ->
 				withSaneMode f $
 					B.writeFile f =<< B.reverse <$> B.readFile f
-			Delete s -> withfile s $ removeWhenExistsWith removeLink
+			Delete s -> withfile s $ removeWhenExistsWith R.removeLink . toRawFilePath
 			AppendGarbage s garbage ->
 				withfile s $ \f ->
 					withSaneMode f $
@@ -127,15 +129,15 @@ applyDamage ds r = do
 								]
 			ScrambleFileMode s mode ->
 				withfile s $ \f ->
-					setFileMode f mode
+					R.setFileMode (toRawFilePath f) mode
 			SwapFiles a b ->
 				withfile a $ \fa ->
 					withfile b $ \fb -> 
 						unless (fa == fb) $
 							withTmpFile "swap" $ \tmp _ -> do
-								moveFile fa tmp
-								moveFile fb fa
-								moveFile tmp fa
+								moveFile (toRawFilePath fa) (toRawFilePath tmp)
+								moveFile (toRawFilePath fb) (toRawFilePath fa)
+								moveFile (toRawFilePath tmp) (toRawFilePath fa)
   where
 	-- A broken .git/config is not recoverable.
 	-- Don't damage hook scripts, to avoid running arbitrary code. ;)

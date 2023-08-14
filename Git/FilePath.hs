@@ -5,7 +5,7 @@
  - top of the repository even when run in a subdirectory. Adding some
  - types helps keep that straight.
  -
- - Copyright 2012-2019 Joey Hess <id@joeyh.name>
+ - Copyright 2012-2023 Joey Hess <id@joeyh.name>
  -
  - Licensed under the GNU AGPL version 3 or higher.
  -}
@@ -30,12 +30,12 @@ module Git.FilePath (
 
 import Common
 import Git
+import Git.Quote
 
 import qualified System.FilePath.ByteString as P
 import qualified System.FilePath.Posix.ByteString
 import GHC.Generics
 import Control.DeepSeq
-import qualified Data.ByteString as S
 
 {- A RawFilePath, relative to the top of the git repository. -}
 newtype TopFilePath = TopFilePath { getTopFilePath :: RawFilePath }
@@ -46,11 +46,11 @@ instance NFData TopFilePath
 {- A file in a branch or other treeish. -}
 data BranchFilePath = BranchFilePath Ref TopFilePath
 	deriving (Show, Eq, Ord)
-
+ 
 {- Git uses the branch:file form to refer to a BranchFilePath -}
-descBranchFilePath :: BranchFilePath -> S.ByteString
+descBranchFilePath :: BranchFilePath -> StringContainingQuotedPath
 descBranchFilePath (BranchFilePath b f) =
-	fromRef' b <> ":" <> getTopFilePath f
+	UnquotedByteString (fromRef' b) <> ":" <> QuotedPath (getTopFilePath f)
 
 {- Path to a TopFilePath, within the provided git repo. -}
 fromTopFilePath :: TopFilePath -> Git.Repo -> RawFilePath

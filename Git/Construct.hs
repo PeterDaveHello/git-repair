@@ -1,6 +1,6 @@
 {- Construction of Git Repo objects
  -
- - Copyright 2010-2021 Joey Hess <id@joeyh.name>
+ - Copyright 2010-2023 Joey Hess <id@joeyh.name>
  -
  - Licensed under the GNU AGPL version 3 or higher.
  -}
@@ -23,6 +23,7 @@ module Git.Construct (
 	checkForRepo,
 	newFrom,
 	adjustGitDirFile,
+	isBareRepo,
 ) where
 
 #ifndef mingw32_HOST_OS
@@ -38,6 +39,7 @@ import Git.Remote
 import Git.FilePath
 import qualified Git.Url as Url
 import Utility.UserInfo
+import Utility.Url.Parse
 
 import qualified Data.ByteString as B
 import qualified System.FilePath.ByteString as P
@@ -84,7 +86,7 @@ fromAbsPath :: RawFilePath -> IO Repo
 fromAbsPath dir
 	| absoluteGitPath dir = fromPath dir
 	| otherwise =
-		error $ "internal error, " ++ show dir ++ " is not absolute"
+		giveup $ "internal error, " ++ show dir ++ " is not absolute"
 
 {- Construct a Repo for a remote's url.
  -
@@ -103,10 +105,10 @@ fromUrl url
 
 fromUrl' :: String -> IO Repo
 fromUrl' url
-	| "file://" `isPrefixOf` url = case parseURI url of
+	| "file://" `isPrefixOf` url = case parseURIPortable url of
 		Just u -> fromAbsPath $ toRawFilePath $ unEscapeString $ uriPath u
 		Nothing -> pure $ newFrom $ UnparseableUrl url
-	| otherwise = case parseURI url of
+	| otherwise = case parseURIPortable url of
 		Just u -> pure $ newFrom $ Url u
 		Nothing -> pure $ newFrom $ UnparseableUrl url
 
@@ -128,7 +130,7 @@ localToUrl reference r
 				, auth
 				, fromRawFilePath (repoPath r)
 				]
-			in r { location = Url $ fromJust $ parseURI absurl }
+			in r { location = Url $ fromJust $ parseURIPortable absurl }
 		_ -> r
 
 {- Calculates a list of a repo's configured remotes, by parsing its config. -}
@@ -139,7 +141,7 @@ fromRemotes repo = catMaybes <$> mapM construct remotepairs
 	filterkeys f = filterconfig (\(k,_) -> f k)
 	remotepairs = filterkeys isRemoteUrlKey
 	construct (k,v) = remoteNamedFromKey k $
-		fromRemoteLocation (fromConfigValue v) repo
+		fromRemoteLocation (fromConfigValue v) False repo
 
 {- Sets the name of a remote when constructing the Repo to represent it. -}
 remoteNamed :: String -> IO Repo -> IO Repo
@@ -155,9 +157,15 @@ remoteNamedFromKey k r = case remoteKeyToRemoteName k of
 	Just n -> Just <$> remoteNamed n r
 
 {- Constructs a new Repo for one of a Repo's remotes using a given
- - location (ie, an url). -}
-fromRemoteLocation :: String -> Repo -> IO Repo
-fromRemoteLocation s repo = gen $ parseRemoteLocation s repo
+ - location (ie, an url). 
+ -
+ - knownurl can be true if the location is known to be an url. This allows
+ - urls that don't parse as urls to be used, returning UnparseableUrl.
+ - If knownurl is false, the location may still be an url, if it parses as
+ - one.
+ -}
+fromRemoteLocation :: String -> Bool -> Repo -> IO Repo
+fromRemoteLocation s knownurl repo = gen $ parseRemoteLocation s knownurl repo
   where
 	gen (RemotePath p) = fromRemotePath p repo
 	gen (RemoteUrl u) = fromUrl u
@@ -216,7 +224,7 @@ checkForRepo :: FilePath -> IO (Maybe RepoLocation)
 checkForRepo dir = 
 	check isRepo $
 		check (checkGitDirFile (toRawFilePath dir)) $
-			check isBareRepo $
+			check (checkdir (isBareRepo dir)) $
 				return Nothing
   where
 	check test cont = maybe cont (return . Just) =<< test
@@ -225,16 +233,17 @@ checkForRepo dir =
 		, return Nothing
 		)
 	isRepo = checkdir $ 
-		gitSignature (".git" </> "config")
+		doesFileExist (dir </> ".git" </> "config")
 			<||>
-		-- A git-worktree lacks .git/config, but has .git/commondir.
+		-- A git-worktree lacks .git/config, but has .git/gitdir.
 		-- (Normally the .git is a file, not a symlink, but it can
 		-- be converted to a symlink and git will still work;
 		-- this handles that case.)
-		gitSignature (".git" </> "gitdir")
-	isBareRepo = checkdir $ gitSignature "config"
-		<&&> doesDirectoryExist (dir </> "objects")
-	gitSignature file = doesFileExist $ dir </> file
+		doesFileExist (dir </>  ".git" </> "gitdir")
+
+isBareRepo :: FilePath -> IO Bool
+isBareRepo dir = doesFileExist (dir </> "config")
+	<&&> doesDirectoryExist (dir </> "objects")
 
 -- Check for a .git file.
 checkGitDirFile :: RawFilePath -> IO (Maybe RepoLocation)
@@ -277,5 +286,6 @@ newFrom l = Repo
 	, gitEnv = Nothing
 	, gitEnvOverridesGitDir = False
 	, gitGlobalOpts = []
+	, gitDirSpecifiedExplicitly = False
 	}
 

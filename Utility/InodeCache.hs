@@ -32,6 +32,7 @@ module Utility.InodeCache (
 	inodeCacheToMtime,
 	inodeCacheToEpochTime,
 	inodeCacheEpochTimeRange,
+	replaceInode,
 
 	SentinalFile(..),
 	SentinalStatus(..),
@@ -50,11 +51,10 @@ import Utility.QuickCheck
 import qualified Utility.RawFilePath as R
 
 import System.PosixCompat.Types
+import System.PosixCompat.Files (isRegularFile, fileID)
 import Data.Time.Clock.POSIX
 
-#ifdef mingw32_HOST_OS
-import Data.Word (Word64)
-#else
+#ifndef mingw32_HOST_OS
 import qualified System.Posix.Files as Posix
 #endif
 
@@ -125,7 +125,11 @@ inodeCacheEpochTimeRange i =
 	let t = inodeCacheToEpochTime i
 	in (t-1, t+1)
 
-{- For backwards compatability, support low-res mtime with no
+replaceInode :: FileID -> InodeCache -> InodeCache
+replaceInode inode (InodeCache (InodeCachePrim _ sz mtime)) =
+	InodeCache (InodeCachePrim inode sz mtime)
+
+{- For backwards compatibility, support low-res mtime with no
  - fractional seconds. -}
 data MTime = MTimeLowRes EpochTime | MTimeHighRes POSIXTime
 	deriving (Show, Ord)
@@ -187,7 +191,7 @@ readInodeCache s = case words s of
 
 genInodeCache :: RawFilePath -> TSDelta -> IO (Maybe InodeCache)
 genInodeCache f delta = catchDefaultIO Nothing $
-	toInodeCache delta f =<< R.getFileStatus f
+	toInodeCache delta f =<< R.getSymbolicLinkStatus f
 
 toInodeCache :: TSDelta -> RawFilePath -> FileStatus -> IO (Maybe InodeCache)
 toInodeCache d f s = toInodeCache' d f s (fileID s)
@@ -243,7 +247,7 @@ data SentinalStatus = SentinalStatus
  - On Windows, time stamp differences are ignored, since they change
  - with the timezone.
  -
- - When the sential file does not exist, InodeCaches canot reliably be
+ - When the sential file does not exist, InodeCaches cannot reliably be
  - compared, so the assumption is that there is has been a change.
  -}
 checkSentinalFile :: SentinalFile -> IO SentinalStatus

@@ -30,6 +30,7 @@ import Git.Types
 import Git.Fsck
 import Git.Index
 import Git.Env
+import Git.FilePath
 import qualified Git.Config as Config
 import qualified Git.Construct as Construct
 import qualified Git.LsTree as LsTree
@@ -95,7 +96,7 @@ explodePacks r = go =<< listPackFiles r
 			let dest = objectsDir r P.</> f
 			createDirectoryIfMissing True
 				(fromRawFilePath (parentDir dest))
-			moveFile objfile (fromRawFilePath dest)
+			moveFile (toRawFilePath objfile) dest
 		forM_ packs $ \packfile -> do
 			let f = toRawFilePath packfile
 			removeWhenExistsWith R.removeLink f
@@ -103,7 +104,7 @@ explodePacks r = go =<< listPackFiles r
 		return True
 
 {- Try to retrieve a set of missing objects, from the remotes of a
- - repository. Returns any that could not be retreived.
+ - repository. Returns any that could not be retrieved.
  -
  - If another clone of the repository exists locally, which might not be a
  - remote of the repo being repaired, its path can be passed as a reference
@@ -252,7 +253,8 @@ getAllRefs r = getAllRefs' (fromRawFilePath (localGitDir r) </> "refs")
 getAllRefs' :: FilePath -> IO [Ref]
 getAllRefs' refdir = do
 	let topsegs = length (splitPath refdir) - 1
-	let toref = Ref . encodeBS . joinPath . drop topsegs . splitPath
+	let toref = Ref . toInternalGitPath . encodeBS 
+		. joinPath . drop topsegs . splitPath
 	map toref <$> dirContentsRecursive refdir
 
 explodePackedRefsFile :: Repo -> IO ()
@@ -269,7 +271,7 @@ explodePackedRefsFile r = do
 		let gitd = localGitDir r
 		let dest = gitd P.</> fromRef' ref
 		let dest' = fromRawFilePath dest
-		createDirectoryUnder gitd (parentDir dest)
+		createDirectoryUnder [gitd] (parentDir dest)
 		unlessM (doesFileExist dest') $
 			writeFile dest' (fromRef sha)
 
@@ -433,7 +435,7 @@ rewriteIndex r
 	reinject (file, sha, mode, _) = case toTreeItemType mode of
 		Nothing -> return Nothing
 		Just treeitemtype -> Just <$>
-			UpdateIndex.stageFile sha treeitemtype (fromRawFilePath file) r
+			UpdateIndex.stageFile sha treeitemtype file r
 
 newtype GoodCommits = GoodCommits (S.Set Sha)
 

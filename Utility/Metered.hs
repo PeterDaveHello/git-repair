@@ -53,6 +53,7 @@ import Utility.DataUnits
 import Utility.HumanTime
 import Utility.SimpleProtocol as Proto
 import Utility.ThreadScheduler
+import Utility.SafeOutput
 
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString as S
@@ -321,7 +322,7 @@ demeterCommandEnv oh cmd params environ = do
   where
 	stdouthandler l = 
 		unless (quietMode oh) $
-			putStrLn l
+			putStrLn (safeOutput l)
 
 {- To suppress progress output, while displaying other messages,
  - filter out lines that contain \r (typically used to reset to the
@@ -491,14 +492,14 @@ bandwidthMeter mtotalsize (MeterState (BytesProcessed old) before) (MeterState (
 		, estimatedcompletion
 		]
   where
-	amount = roughSize' memoryUnits True 2 new
+	amount = roughSize' committeeUnits True 2 new
 	percentamount = case mtotalsize of
 		Just (TotalSize totalsize) ->
 			let p = showPercentage 0 $
 				percentage totalsize (min new totalsize)
 			in p ++ replicate (6 - length p) ' ' ++ amount
 		Nothing -> amount
-	rate = roughSize' memoryUnits True 0 bytespersecond ++ "/s"
+	rate = roughSize' committeeUnits True 0 bytespersecond ++ "/s"
 	bytespersecond
 		| duration == 0 = fromIntegral transferred
 		| otherwise = floor $ fromIntegral transferred / duration

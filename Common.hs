@@ -18,7 +18,7 @@ import System.IO as X hiding (FilePath)
 import System.Posix.IO as X hiding (createPipe)
 #endif
 import System.Exit as X
-import System.PosixCompat.Files as X
+import System.PosixCompat.Files as X (FileStatus)
 
 import Utility.Misc as X
 import Utility.Exception as X

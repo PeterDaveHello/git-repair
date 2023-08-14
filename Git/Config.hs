@@ -1,6 +1,6 @@
 {- git repository configuration handling
  -
- - Copyright 2010-2020 Joey Hess <id@joeyh.name>
+ - Copyright 2010-2022 Joey Hess <id@joeyh.name>
  -
  - Licensed under the GNU AGPL version 3 or higher.
  -}
@@ -22,6 +22,8 @@ import Git.Types
 import qualified Git.Command
 import qualified Git.Construct
 import Utility.UserInfo
+import Utility.Process.Transcript
+import Utility.Debug
 
 {- Returns a single git config setting, or a fallback value if not set. -}
 get :: ConfigKey -> ConfigValue -> Repo -> ConfigValue
@@ -55,12 +57,22 @@ reRead r = read' $ r
 read' :: Repo -> IO Repo
 read' repo = go repo
   where
-	go Repo { location = Local { gitdir = d } } = git_config d
-	go Repo { location = LocalUnknown d } = git_config d
+	-- Passing --git-dir changes git's behavior when run in a
+	-- repository belonging to another user. When the git directory
+	-- was explicitly specified, pass that in order to get the local
+	-- git config.
+	go Repo { location = Local { gitdir = d } }
+		| gitDirSpecifiedExplicitly repo = git_config ["--git-dir=."] d
+	-- Run in worktree when there is one, since running in the .git
+	-- directory will trigger safe.bareRepository=explicit, even
+	-- when not in a bare repository.
+	go Repo { location = Local { worktree = Just d } } = git_config [] d
+	go Repo { location = Local { gitdir = d } } = git_config [] d
+	go Repo { location = LocalUnknown d } = git_config [] d
 	go _ = assertLocal repo $ error "internal"
-	git_config d = withCreateProcess p (git_config' p)
+	git_config addparams d = withCreateProcess p (git_config' p)
 	  where
-		params = ["config", "--null", "--list"]
+		params = addparams ++ ["config", "--null", "--list"]
 		p = (proc "git" params)
 			{ cwd = Just (fromRawFilePath d)
 			, env = gitEnv repo
@@ -94,19 +106,23 @@ global = do
 hRead :: Repo -> ConfigStyle -> Handle -> IO Repo
 hRead repo st h = do
 	val <- S.hGetContents h
-	store val st repo
+	let c = parse val st
+	debug (DebugSource "Git.Config") $ "git config read: " ++
+		show (map (\(k, v) -> (show k, map show v)) (M.toList c))
+	storeParsed c repo
 
 {- Stores a git config into a Repo, returning the new version of the Repo.
  - The git config may be multiple lines, or a single line.
  - Config settings can be updated incrementally.
  -}
 store :: S.ByteString -> ConfigStyle -> Repo -> IO Repo
-store s st repo = do
-	let c = parse s st
-	updateLocation $ repo
-		{ config = (M.map Prelude.head c) `M.union` config repo
-		, fullconfig = M.unionWith (++) c (fullconfig repo)
-		}
+store s st = storeParsed (parse s st)
+
+storeParsed :: M.Map ConfigKey [ConfigValue] -> Repo -> IO Repo
+storeParsed c repo = updateLocation $ repo
+	{ config = (M.map Prelude.head c) `M.union` config repo
+	, fullconfig = M.unionWith (++) c (fullconfig repo)
+	}
 
 {- Stores a single config setting in a Repo, returning the new version of
  - the Repo. Config settings can be updated incrementally. -}
@@ -123,14 +139,28 @@ store' k v repo = repo
  - based on the core.bare and core.worktree settings.
  -}
 updateLocation :: Repo -> IO Repo
-updateLocation r@(Repo { location = LocalUnknown d })
-	| isBare r = ifM (doesDirectoryExist (fromRawFilePath dotgit))
-			( updateLocation' r $ Local dotgit Nothing
-			, updateLocation' r $ Local d Nothing
-			)
-	| otherwise = updateLocation' r $ Local dotgit (Just d)
+updateLocation r@(Repo { location = LocalUnknown d }) = case isBare r of
+	Just True -> ifM (doesDirectoryExist (fromRawFilePath dotgit))
+		( updateLocation' r $ Local dotgit Nothing
+		, updateLocation' r $ Local d Nothing
+		)
+	Just False -> mknonbare
+	{- core.bare not in config, probably because safe.directory
+	 - did not allow reading the config -}
+	Nothing -> ifM (Git.Construct.isBareRepo (fromRawFilePath d))
+		( mkbare
+		, mknonbare
+		)
   where
 	dotgit = d P.</> ".git"
+	-- git treats eg ~/foo as a bare git repository located in
+	-- ~/foo/.git if ~/foo/.git/config has core.bare=true
+	mkbare = ifM (doesDirectoryExist (fromRawFilePath dotgit))
+		( updateLocation' r $ Local dotgit Nothing
+		, updateLocation' r $ Local d Nothing
+		)
+	mknonbare = updateLocation' r $ Local dotgit (Just d)
+
 updateLocation r@(Repo { location = l@(Local {}) }) = updateLocation' r l
 updateLocation r = return r
 
@@ -202,8 +232,9 @@ boolConfig' :: Bool -> S.ByteString
 boolConfig' True = "true"
 boolConfig' False = "false"
 
-isBare :: Repo -> Bool
-isBare r = fromMaybe False $ isTrueFalse' =<< getMaybe coreBare r
+{- Note that repoIsLocalBare is often better to use than this. -}
+isBare :: Repo -> Maybe Bool
+isBare r = isTrueFalse' =<< getMaybe coreBare r
 
 coreBare :: ConfigKey
 coreBare = "core.bare"
@@ -273,3 +304,27 @@ unset ck@(ConfigKey k) r = ifM (Git.Command.runBool ps r)
 	)
   where
 	ps = [Param "config", Param "--unset-all", Param (decodeBS k)]
+
+{- git "fixed" CVE-2022-24765 by preventing git-config from
+ - listing per-repo configs when the repo is not owned by
+ - the current user. Detect if this fix is in effect for the
+ - repo.
+ -}
+checkRepoConfigInaccessible :: Repo -> IO Bool
+checkRepoConfigInaccessible r
+	-- When --git-dir or GIT_DIR is used to specify the git
+	-- directory, git does not check for CVE-2022-24765.
+	| gitDirSpecifiedExplicitly r = return False
+	| otherwise = do
+		-- Cannot use gitCommandLine here because specifying --git-dir
+		-- will bypass the git security check.
+		let p = (proc "git" ["config", "--local", "--list"])
+			{ cwd = Just (fromRawFilePath (repoPath r))
+			, env = gitEnv r
+			}
+		(out, ok) <- processTranscript' p Nothing
+		if not ok
+			then do
+				debug (DebugSource "Git.Config") ("config output: " ++ out)
+				return True
+			else return False

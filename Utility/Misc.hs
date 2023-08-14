@@ -12,6 +12,7 @@ module Utility.Misc (
 	readFileStrict,
 	separate,
 	separate',
+	separateEnd',
 	firstLine,
 	firstLine',
 	segment,
@@ -62,6 +63,13 @@ separate' c l = unbreak $ S.break c l
 		| S.null b = r
 		| otherwise = (a, S.tail b)
 
+separateEnd' :: (Word8 -> Bool) -> S.ByteString -> (S.ByteString, S.ByteString)
+separateEnd' c l = unbreak $ S.breakEnd c l
+  where
+	unbreak r@(a, b)
+		| S.null a = r
+		| otherwise = (S.init a, b)
+
 {- Breaks out the first line. -}
 firstLine :: String -> String
 firstLine = takeWhile (/= '\n')
@@ -86,7 +94,7 @@ prop_segment_regressionTest :: Bool
 prop_segment_regressionTest = all id
 	-- Even an empty list is a segment.
 	[ segment (== "--") [] == [[]]
-	-- There are two segements in this list, even though the first is empty.
+	-- There are two segments in this list, even though the first is empty.
 	, segment (== "--") ["--", "foo", "bar"] == [[],["foo","bar"]]
 	]
 

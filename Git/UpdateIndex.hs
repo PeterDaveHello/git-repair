@@ -1,6 +1,6 @@
 {- git-update-index library
  -
- - Copyright 2011-2020 Joey Hess <id@joeyh.name>
+ - Copyright 2011-2022 Joey Hess <id@joeyh.name>
  -
  - Licensed under the GNU AGPL version 3 or higher.
  -}
@@ -99,15 +99,15 @@ updateIndexLine sha treeitemtype file = L.fromStrict $
 	<> "\t"
 	<> indexPath file
 
-stageFile :: Sha -> TreeItemType -> FilePath -> Repo -> IO Streamer
+stageFile :: Sha -> TreeItemType -> RawFilePath -> Repo -> IO Streamer
 stageFile sha treeitemtype file repo = do
-	p <- toTopFilePath (toRawFilePath file) repo
+	p <- toTopFilePath file repo
 	return $ pureStreamer $ updateIndexLine sha treeitemtype p
 
 {- A streamer that removes a file from the index. -}
-unstageFile :: FilePath -> Repo -> IO Streamer
+unstageFile :: RawFilePath -> Repo -> IO Streamer
 unstageFile file repo = do
-	p <- toTopFilePath (toRawFilePath file) repo
+	p <- toTopFilePath file repo
 	return $ unstageFile' p
 
 unstageFile' :: TopFilePath -> Streamer
@@ -135,9 +135,17 @@ stageDiffTreeItem d = case toTreeItemType (Diff.dstmode d) of
 indexPath :: TopFilePath -> InternalGitPath
 indexPath = toInternalGitPath . getTopFilePath
 
-{- Refreshes the index, by checking file stat information.  -}
-refreshIndex :: Repo -> ((RawFilePath -> IO ()) -> IO ()) -> IO Bool
-refreshIndex repo feeder = withCreateProcess p go
+{- Refreshes the index, by checking file stat information.
+ -
+ - The action is passed a callback that it can use to send filenames to
+ - update-index. Sending Nothing will wait for update-index to finish
+ - updating the index.
+ -}
+refreshIndex :: (MonadIO m, MonadMask m) => Repo -> ((Maybe RawFilePath -> IO ()) -> m ()) -> m ()
+refreshIndex repo feeder = bracket
+	(liftIO $ createProcess p)
+	(liftIO . cleanupProcess)
+	go
   where
 	params = 
 		[ Param "update-index"
@@ -150,10 +158,12 @@ refreshIndex repo feeder = withCreateProcess p go
 	p = (gitCreateProcess params repo)
 		{ std_in = CreatePipe }
 
-	go (Just h) _ _ pid = do
-		feeder $ \f ->
-			S.hPut h (S.snoc f 0)
-		hFlush h
-		hClose h
-		checkSuccessProcess pid
-	go _ _ _ _ = error "internal"
+	go (Just h, _, _, pid) = do
+		let closer = do
+			hClose h
+			forceSuccessProcess p pid
+		feeder $ \case
+			Just f -> S.hPut h (S.snoc f 0)
+			Nothing -> closer
+		liftIO $ closer
+	go _ = error "internal"

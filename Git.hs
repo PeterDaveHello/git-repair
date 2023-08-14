@@ -1,6 +1,6 @@
 {- git repository handling 
  -
- - This is written to be completely independant of git-annex and should be
+ - This is written to be completely independent of git-annex and should be
  - suitable for other uses.
  -
  - Copyright 2010-2021 Joey Hess <id@joeyh.name>
@@ -68,18 +68,18 @@ repoLocation Repo { location = UnparseableUrl url } = url
 repoLocation Repo { location = Local { worktree = Just dir } } = fromRawFilePath dir
 repoLocation Repo { location = Local { gitdir = dir } } = fromRawFilePath dir
 repoLocation Repo { location = LocalUnknown dir } = fromRawFilePath dir
-repoLocation Repo { location = Unknown } = error "unknown repoLocation"
+repoLocation Repo { location = Unknown } = giveup "unknown repoLocation"
 
 {- Path to a repository. For non-bare, this is the worktree, for bare, 
- - it's the gitdit, and for URL repositories, is the path on the remote
+ - it's the gitdir, and for URL repositories, is the path on the remote
  - host. -}
 repoPath :: Repo -> RawFilePath
 repoPath Repo { location = Url u } = toRawFilePath $ unEscapeString $ uriPath u
 repoPath Repo { location = Local { worktree = Just d } } = d
 repoPath Repo { location = Local { gitdir = d } } = d
 repoPath Repo { location = LocalUnknown dir } = dir
-repoPath Repo { location = Unknown } = error "unknown repoPath"
-repoPath Repo { location = UnparseableUrl _u } = error "unknwon repoPath"
+repoPath Repo { location = Unknown } = giveup "unknown repoPath"
+repoPath Repo { location = UnparseableUrl _u } = giveup "unknown repoPath"
 
 repoWorkTree :: Repo -> Maybe RawFilePath
 repoWorkTree Repo { location = Local { worktree = Just d } } = Just d
@@ -88,7 +88,7 @@ repoWorkTree _ = Nothing
 {- Path to a local repository's .git directory. -}
 localGitDir :: Repo -> RawFilePath
 localGitDir Repo { location = Local { gitdir = d } } = d
-localGitDir _ = error "unknown localGitDir"
+localGitDir _ = giveup "unknown localGitDir"
 
 {- Some code needs to vary between URL and normal repos,
  - or bare and non-bare, these functions help with that. -}
@@ -129,7 +129,7 @@ repoIsLocalUnknown _ = False
 
 assertLocal :: Repo -> a -> a
 assertLocal repo action
-	| repoIsUrl repo = error $ unwords
+	| repoIsUrl repo = giveup $ unwords
 		[ "acting on non-local git repo"
 		, repoDescribe repo
 		, "not supported"
@@ -156,7 +156,7 @@ hookPath script repo = do
 #if mingw32_HOST_OS
 	isexecutable f = doesFileExist f
 #else
-	isexecutable f = isExecutable . fileMode <$> getFileStatus f
+	isexecutable f = isExecutable . fileMode <$> getSymbolicLinkStatus f
 #endif
 
 {- Makes the path to a local Repo be relative to the cwd. -}

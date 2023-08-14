@@ -1,3 +1,10 @@
+git-repair (1.20230814) UNRELEASED; urgency=medium
+
+  * Merge from git-annex.
+  * Support building with unix-compat 0.7
+
+ -- Joey Hess <id@joeyh.name>  Mon, 14 Aug 2023 12:06:46 -0400
+
 git-repair (1.20220404) unstable; urgency=medium
 
   * Avoid treating refs that are not commit objects as evidence of

@@ -1,5 +1,5 @@
 Name: git-repair
-Version: 1.20220404
+Version: 1.20230814
 Cabal-Version: >= 1.10
 License: AGPL-3
 Maintainer: Joey Hess <joey@kitenet.net>
@@ -73,13 +73,13 @@ Executable git-repair
     Git.DiffTreeItem
     Git.Env
     Git.FilePath
-    Git.Filename
     Git.Fsck
     Git.HashObject
     Git.Index
     Git.LsFiles
     Git.LsTree
     Git.Objects
+    Git.Quote
     Git.Ref
     Git.RefLog
     Git.Remote
@@ -120,10 +120,12 @@ Executable git-repair
     Utility.Percentage
     Utility.Process
     Utility.Process.Shim
+    Utility.Process.Transcript
     Utility.QuickCheck
     Utility.RawFilePath
     Utility.Rsync
     Utility.SafeCommand
+    Utility.SafeOutput
     Utility.SimpleProtocol
     Utility.Split
     Utility.SystemDirectory
@@ -133,3 +135,4 @@ Executable git-repair
     Utility.Tmp.Dir
     Utility.Tuple
     Utility.UserInfo
+    Utility.Url.Parse

@@ -20,6 +20,7 @@ module Utility.Path (
 	runSegmentPaths',
 	dotfile,
 	splitShortExtensions,
+	splitShortExtensions',
 	relPathDirToFileAbs,
 	inSearchPath,
 	searchPath,
@@ -53,7 +54,7 @@ import Utility.FileSystemEncoding
  -
  - This does not guarantee that two paths that refer to the same location,
  - and are both relative to the same location (or both absolute) will
- - yeild the same result. Run both through normalise from System.RawFilePath
+ - yield the same result. Run both through normalise from System.RawFilePath
  - to ensure that.
  -}
 simplifyPath :: RawFilePath -> RawFilePath
@@ -90,7 +91,7 @@ upFrom dir
 
 {- Checks if the first RawFilePath is, or could be said to contain the second.
  - For example, "foo/" contains "foo/bar". Also, "foo", "./foo", "foo/" etc
- - are all equivilant.
+ - are all equivalent.
  -}
 dirContains :: RawFilePath -> RawFilePath -> Bool
 dirContains a b = a == b
