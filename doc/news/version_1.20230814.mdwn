@@ -1,0 +1,3 @@
+git-repair 1.20230814 released with [[!toggle text="these changes"]]
+[[!toggleable text="""  * Merge from git-annex.
+  * Support building with unix-compat 0.7"""]]

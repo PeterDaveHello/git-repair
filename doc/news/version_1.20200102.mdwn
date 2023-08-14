@@ -1,7 +1,0 @@
-git-repair 1.20200102 released with [[!toggle text="these changes"]]
-[[!toggleable text="""
-   * Relicensed AGPL.
-   * Merge from git-annex.
-   * Removed the network-uri build flag.
-   * Increased required version of several dependencies.
-   * Added dependencies on deepseq, attoparsec and filepath-bytestring."""]]
