@@ -26,7 +26,7 @@ Extra-Source-Files:
   git-repair.1
 
 custom-setup
-  Setup-Depends: base (>= 4.11.1.0), 
+  Setup-Depends: base (>= 4.11.1.0 && < 5.0), 
     hslogger, split, unix-compat, process, unix, filepath,
     filepath-bytestring (>= 1.4.2.1.4), async,
     exceptions, bytestring, directory, IfElse, data-default,
