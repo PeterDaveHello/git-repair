@@ -59,7 +59,6 @@ Executable git-repair
     BuildInfo
     Build.Configure
     Build.TestConfig
-    Build.Version
     Common
     Git
     Git.Branch
