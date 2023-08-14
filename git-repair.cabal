@@ -30,7 +30,7 @@ custom-setup
     hslogger, split, unix-compat, process, unix, filepath,
     filepath-bytestring (>= 1.4.2.1.4), async,
     exceptions, bytestring, directory, IfElse, data-default,
-    mtl, Cabal, time
+    mtl, Cabal (< 4.0), time
 
 source-repository head
   type: git
